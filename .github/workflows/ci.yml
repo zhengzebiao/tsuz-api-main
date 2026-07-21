@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+
+env:
+  IMAGE_NAME: auth-service
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_auth
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_auth"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://test_user:test_password@localhost:5432/test_auth
+      REDIS_URL: redis://localhost:6379/0
+      JWT_PRIVATE_KEY: ${{ secrets.TEST_JWT_PRIVATE_KEY }}
+      JWT_PUBLIC_KEY: ${{ secrets.TEST_JWT_PUBLIC_KEY }}
+      CORS_ALLOW_ORIGINS: ${{ secrets.TEST_CORS_ALLOW_ORIGINS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pipx install pdm
+      - run: pdm install
+      - run: pdm run lint
+      - run: pdm run test
+      - name: Check Alembic migration state
+        run: pdm run alembic-current
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build --tag "$IMAGE_NAME:ci-${{ github.sha }}" .

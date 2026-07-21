@@ -1,0 +1,45 @@
+[project]
+name = "tsuz-api-main"
+version = "0.0.0"
+description = "FastAPI authentication service with PostgreSQL, Redis, RS256 JWT, Alembic, Docker, nginx, and CI."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "gunicorn>=23.0.0",
+  "uvicorn-worker>=0.3.0",
+  "pydantic-settings>=2.7.0",
+  "sqlalchemy>=2.0.36",
+  "alembic>=1.14.0",
+  "psycopg[binary]>=3.2.3",
+  "redis>=5.2.1",
+  "pyjwt[crypto]>=2.10.1",
+  "passlib[bcrypt]>=1.7.4",
+  "bcrypt>=4.0.1,<5.0.0",
+  "email-validator>=2.2.0"
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.4",
+  "httpx>=0.28.1",
+  "ruff>=0.8.4"
+]
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.scripts]
+dev = "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+lint = "ruff check ."
+test = "pytest"
+migrate = "alembic upgrade head"
+alembic-current = "alembic current"
+seed = "python -m app.seed"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120

@@ -1,0 +1,91 @@
+name: Migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment for the migration
+        required: true
+        type: choice
+        options:
+          - test
+          - product
+      revision:
+        description: Alembic target revision, for example head or a revision id
+        required: true
+        default: head
+        type: string
+      backup_confirmed:
+        description: Confirm database backup and rollback plan before product migration
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      REVISION: ${{ inputs.revision }}
+      BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate migration inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DEPLOY_ENV" in
+            test|product)
+              ;;
+            *)
+              echo "Unsupported migration environment: $DEPLOY_ENV" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$REVISION" ]; then
+            echo "Refusing to run migration without an Alembic revision." >&2
+            exit 1
+          fi
+
+          if ! [[ "$REVISION" =~ ^[A-Za-z0-9_.:-]+$ ]]; then
+            echo "Refusing to run migration with unsupported revision characters." >&2
+            exit 1
+          fi
+
+          if [ "$DEPLOY_ENV" = "product" ] && [ "$BACKUP_CONFIRMED" != "true" ]; then
+            echo "Refusing to run product migration without backup confirmation." >&2
+            exit 1
+          fi
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST environment variable}"
+          : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
+          : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
+          : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY secret}"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+      - name: Run Alembic migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Running auth-service migration for $DEPLOY_ENV to revision $REVISION."
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic current && docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic upgrade '$REVISION' && docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic current"

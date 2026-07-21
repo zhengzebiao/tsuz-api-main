@@ -1,0 +1,40 @@
+services:
+  api:
+    image: ${DOCKER_IMAGE_NAME}:${APP_VERSION}
+    container_name: ${CONTAINER_NAME:-auth-service}
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ${NGINX_CONTAINER_NAME:-auth-service-nginx}
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  backend:
+    external: true
+    name: ${DOCKER_NETWORK_NAME:-product-backend}
