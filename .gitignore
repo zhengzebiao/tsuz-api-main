@@ -3,8 +3,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.pdm-python
 .env
 .env.*
+!.env.local.example
 !.env.test.example
 !.env.product.example
 !.env.deploy.example
