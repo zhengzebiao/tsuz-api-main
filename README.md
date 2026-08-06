@@ -23,16 +23,42 @@ FastAPI authentication service with PostgreSQL, Redis, RS256 JWT, Alembic, Docke
 - nginx
 - GitHub Actions
 
-## Development Server
+## Local Development
 
-Use Uvicorn directly during local development so reloads and tracebacks stay simple:
+The recommended first-time setup runs the API, PostgreSQL, Redis, and nginx in Docker:
 
 ```bash
 pdm install
-pdm run dev
+pdm run init
 ```
 
-PDM manages the virtual environment, dependency groups, and project scripts. The default `docker-compose.yml` is also development-oriented and runs Uvicorn with `--reload` plus a source-code volume mount.
+`init` performs the following steps:
+
+1. Checks Docker Compose and OpenSSL are installed.
+2. Creates `.env` from `.env.local.example` if it does not already exist.
+3. Generates a local RSA-2048 JWT key pair and stores it only in `.env` with mode `0600`.
+4. Starts PostgreSQL and Redis, waits for healthy containers, builds the API image, applies Alembic migrations, and runs the idempotent local seed. If Docker Hub is temporarily unavailable and a prior local image exists, initialization warns and falls back to that image; otherwise retry after `docker pull python:3.12-slim` succeeds.
+5. Starts the API and nginx and checks both `http://127.0.0.1:8000/health` and `http://127.0.0.1:8080/health`.
+
+The command is safe to repeat: an existing `.env` is validated and never overwritten, and migrations/seed do not duplicate existing data. It is a host-side command because it controls Docker; do not run `pdm run init` from inside the API container.
+
+After initialization:
+
+- API: `http://127.0.0.1:8000`
+- Swagger: `http://127.0.0.1:8000/docs`
+- nginx: `http://127.0.0.1:8080`
+
+To stop the local services without deleting data:
+
+```bash
+docker compose stop
+```
+
+Use `docker compose down` only when removing the containers. Do not use `docker compose down -v` unless you intentionally want to delete the local PostgreSQL and Redis volumes.
+
+For a host-side Uvicorn workflow, first start only the dependencies and use `localhost` database/Redis URLs in a separately maintained environment file. The committed `.env.local.example` uses the Compose DNS names `postgres` and `redis`, so it is intended for the Docker workflow above.
+
+PDM manages the virtual environment, dependency groups, and project scripts. The default `docker-compose.yml` is development-oriented and runs Uvicorn with `--reload` plus a source-code volume mount.
 
 ## Production App Server
 
@@ -66,9 +92,13 @@ This template uses PDM with standard `pyproject.toml` metadata.
 
 ## Environment Files
 
+- `.env.local.example` is the non-secret template for the Docker-based local workflow. `pdm run init` copies it to `.env` and generates the JWT key pair.
+- `.env` is local secret material: it is ignored by Git, must not be committed, and should remain mode `0600`.
+- If `.env` already exists, initialization preserves it. If it is missing required values, contains placeholders, or has overly broad permissions, fix or back it up before rerunning `pdm run init`.
 - `.env.test.example` enables Swagger, ReDoc, and OpenAPI JSON.
 - `.env.product.example` disables public docs by default.
 - Use different PostgreSQL databases, Redis instances, JWT keys, issuers, audiences, and GitHub Secrets for test and product.
+- The local Compose template uses `postgres` and `redis` as container hostnames. Host-side commands should use a host-specific environment file with `localhost` URLs instead.
 
 ## Auth API
 
@@ -109,11 +139,11 @@ This template uses PDM with standard `pyproject.toml` metadata.
 
 ## Database Migrations and Seed
 
-- Use `pdm run alembic-current` to inspect the active revision.
-- Use `pdm run migrate` to apply Alembic migrations.
+- `pdm run init` runs the local migration and seed inside one-off API containers after PostgreSQL and Redis become healthy.
+- Use `pdm run alembic-current` to inspect the active revision when running the app with a host-side environment.
+- Use `pdm run migrate` to apply Alembic migrations manually only when your active environment points to reachable services. For the Compose workflow, run the equivalent command with `docker compose run --rm --no-deps api alembic upgrade head`.
 - Use `alembic downgrade -1` or `alembic downgrade <revision_id>` only for development, test, or pre-release rollback drills.
-- Use `pdm run seed` to populate baseline auth data for local development.
-- The seed is idempotent and ensures the default admin user, admin role, and starter permissions exist without duplicating rows.
+- The local seed is idempotent and ensures the default admin user, admin role, and starter permissions exist without duplicating rows. The seeded credentials are for local development only; inspect `app/seed.py` before using them.
 - Product does not auto-run seed; execute it manually only after reviewing the target environment.
 - Prefer immutable image rollback and forward-compatible repair migrations over relying on product database downgrade.
 
@@ -133,6 +163,11 @@ This template uses PDM with standard `pyproject.toml` metadata.
 - **Why does login fail?** Confirm the seeded admin exists, the user is active, and the password matches the stored hash.
 - **Why does refresh fail?** The refresh token may be expired, rotated, or revoked.
 - **Why is `/auth/me` rejected?** The access token may be blacklisted or signed for the wrong issuer/audience.
+- **Why did `pdm run init` fail?** Check that Docker Desktop/daemon is running, `docker compose version` works, and OpenSSL is installed. Then inspect `docker compose ps` and `docker compose logs --tail=80 api postgres redis nginx`.
+- **Why is `.env` rejected?** The initializer refuses missing values, known placeholders, and permissions broader than `0600`. Back up the file, correct it or remove it deliberately, then rerun `pdm run init`.
+- **Why are PostgreSQL or Redis unhealthy?** Check port conflicts on `5432` and `6379`, then inspect their container logs. The initializer does not run `down -v`, so existing data remains available for diagnosis.
+- **Why does host-side `pdm run migrate` fail after local setup?** The Docker template uses the service names `postgres` and `redis`; use the Compose one-off command or a host-specific `.env` with `localhost` URLs.
+- **How do I reset local data?** Stop the stack first, back up anything needed, and run `docker compose down -v` only when deleting the local database and Redis volumes is intentional.
 
 ## GitHub Actions, Secrets, and Environments
 
@@ -326,12 +361,16 @@ Product does not auto-run seed. The Migrate workflow also does not run seed. Use
 ## Scripts
 
 ```bash
+pdm run init
+pdm run init -- --timeout 180
 pdm run test
 pdm run lint
 pdm run migrate
 pdm run seed
 pdm run alembic-current
 ```
+
+`pdm run init -- --timeout 180` forwards the timeout option to the initialization script. `init` is for local Docker development only; deployment migrations and seed operations remain explicit reviewed steps.
 
 ## Project Structure
 
