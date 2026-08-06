@@ -251,6 +251,17 @@ jobs:
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" docker-compose.deploy.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.deploy.yml"
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" nginx/default.conf "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/nginx/default.conf"
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" .env.deploy.generated "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env"
+      - name: Ensure external Docker network exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          network_name="${DOCKER_NETWORK_NAME:-product-backend}"
+          if [[ ! "$network_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+            echo "Invalid DOCKER_NETWORK_NAME: $network_name" >&2
+            exit 1
+          fi
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker network inspect '$network_name' >/dev/null 2>&1 || docker network create '$network_name'"
       - name: Deploy with docker compose
         shell: bash
         run: |
