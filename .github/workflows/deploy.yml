@@ -338,7 +338,7 @@ jobs:
               headers={"X-Request-ID": REQUEST_ID},
           )
           assert_status(health_request, 200, "health")
-          login_body = json.dumps({"username": "__deploy_smoke__", "password": "__deploy_smoke__"}).encode("utf-8")
+          login_body = json.dumps({"username": "__deploy_smoke__@example.com", "password": "__deploy_smoke__"}).encode("utf-8")
           login_request = urllib.request.Request(
               "http://127.0.0.1:8000/auth/login",
               data=login_body,
