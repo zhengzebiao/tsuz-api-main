@@ -4,7 +4,7 @@ from alembic import context
 
 from app.core.config import settings
 from app.core.database import Base
-from app.models import permission, role, session, user  # noqa: F401
+from app.models import audit_event, permission, role, session, user  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

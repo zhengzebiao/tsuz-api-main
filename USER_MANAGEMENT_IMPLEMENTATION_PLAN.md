@@ -226,6 +226,8 @@ is_blacklisted
 
 `keyword` 第一阶段查询邮箱和显示名称。
 
+并发控制：只读查询不使用悲观锁或乐观锁，使用数据库普通一致性读取。列表和详情不应使用 `SELECT ... FOR UPDATE`，避免无必要地阻塞管理操作。
+
 响应中禁止返回：
 
 - `hashed_password`
@@ -283,6 +285,8 @@ user:create
 
 数据库唯一索引是防止并发创建重复邮箱的最终保障，不能只依赖创建前查询。
 
+并发控制：新增用户不锁定目标用户行，因为目标行尚不存在。使用邮箱唯一索引保证并发创建时最多一个请求成功，并捕获唯一约束冲突返回 `409 EMAIL_ALREADY_EXISTS`。如果需要防止同一创建请求因网络重试重复执行，可额外使用 `Idempotency-Key`。
+
 ### 5.3 编辑用户
 
 ```http
@@ -321,6 +325,8 @@ user:update
 - 没有实际字段变化时可直接返回当前数据。
 - 不允许通过该接口修改 `is_active`、`is_blacklisted` 或密码哈希。
 
+并发控制：使用 `version` 乐观锁，不使用 `SELECT ... FOR UPDATE`。更新 SQL 必须同时匹配 `id` 和客户端提交的 `version`，成功后将 `version + 1`。受影响行数为 0 时重新查询：用户不存在返回 404，版本已变化返回 `409 USER_VERSION_CONFLICT`。
+
 错误：
 
 ```text
@@ -351,12 +357,15 @@ user:disable
 
 操作：
 
-1. 锁定用户行。
-2. 设置 `is_active=false`。
-3. 保存 `disabled_at` 和 `disabled_reason`。
-4. 撤销该用户所有活动 Session。
-5. 写入审计记录。
-6. 提交事务。
+1. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+2. 检查自操作、用户当前状态和最后一个有效管理员约束。
+3. 设置 `is_active=false`。
+4. 保存 `disabled_at` 和 `disabled_reason`。
+5. 撤销该用户所有活动 Session。
+6. 写入审计记录。
+7. 提交事务并释放行锁。
+
+并发控制：使用悲观锁。禁用涉及状态判断、最后一个有效管理员校验、批量撤销 Session 和审计记录，必须保证同一用户的状态操作串行执行。若目标属于管理员，仅锁目标用户行不足以保护“最后一个有效管理员”约束，还需使用事务级 advisory lock、锁定管理员角色保护行，或可序列化事务来串行化该全局检查。
 
 限制：
 
@@ -379,11 +388,20 @@ user:enable
 
 操作：
 
+1. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+2. 检查用户是否仍被拉黑。
+3. 如果已经启用，按幂等规则返回 `changed=false`。
+4. 更新：
+
 ```text
 is_active = true
 disabled_at = null
 disabled_reason = null
 ```
+
+5. 写入审计记录并提交事务。
+
+并发控制：使用悲观锁。启用前必须检查 `is_blacklisted`，需要与并发拉黑、禁用或恢复操作串行执行，避免基于过期状态作出判断。启用不恢复旧 Session。
 
 限制：
 
@@ -413,11 +431,15 @@ user:blacklist
 
 操作：
 
-1. 设置 `is_blacklisted=true`。
-2. 保存 `blacklisted_at` 和 `blacklisted_reason`。
-3. 强制撤销全部 Session。
-4. 写入审计记录。
-5. 不修改 `is_active`。
+1. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+2. 检查自操作、用户当前状态和最后一个有效管理员约束。
+3. 设置 `is_blacklisted=true`。
+4. 保存 `blacklisted_at` 和 `blacklisted_reason`。
+5. 强制撤销全部 Session。
+6. 写入审计记录。
+7. 不修改 `is_active`，提交事务并释放行锁。
+
+并发控制：使用悲观锁。拉黑与启用、恢复、禁用、密码重置和强制下线必须对同一目标用户串行执行。若目标属于管理员，“最后一个有效管理员”检查还必须使用与禁用接口相同的全局串行化机制。
 
 限制：
 
@@ -440,11 +462,19 @@ user:recover
 
 操作：
 
+1. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+2. 如果已经解除拉黑，按幂等规则返回 `changed=false`。
+3. 更新：
+
 ```text
 is_blacklisted = false
 blacklisted_at = null
 blacklisted_reason = null
 ```
+
+4. 写入审计记录并提交事务。
+
+并发控制：使用悲观锁，与拉黑、启用、禁用、密码重置和强制下线串行执行。恢复仅修改黑名单字段，不恢复旧 Session，也不自动启用已禁用用户。
 
 恢复后：
 
@@ -475,12 +505,15 @@ user:reset_password
 
 处理：
 
-1. 校验新密码策略。
-2. 生成新的 bcrypt 哈希。
-3. 更新 `hashed_password` 和 `password_changed_at`。
-4. 强制撤销该用户全部 Session。
-5. 写入审计记录。
-6. 返回成功消息，不返回密码和密码哈希。
+1. 在进入锁事务前校验新密码策略并生成 bcrypt 哈希，避免在持锁期间执行耗时计算。
+2. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+3. 校验用户当前状态。
+4. 更新 `hashed_password` 和 `password_changed_at`。
+5. 强制撤销该用户全部 Session。
+6. 写入审计记录并提交事务。
+7. 返回成功消息，不返回密码和密码哈希。
+
+并发控制：使用悲观锁，确保同一用户的并发密码重置、禁用、拉黑或强制下线按顺序执行。并发资料编辑使用乐观锁；所有用户修改都必须递增 `version`，使资料编辑在并发状态或密码变更后得到版本冲突，而不是基于旧版本继续提交。重置密码不是天然幂等操作；若要支持网络安全重试，应结合 `Idempotency-Key`，避免重复更新时间、撤销新 Session 或重复发送通知。
 
 响应：
 
@@ -510,6 +543,16 @@ user:force_logout
   "reason": "Security review"
 }
 ```
+
+处理：
+
+1. 在事务中使用 `SELECT ... FOR UPDATE` 悲观锁锁定目标用户行。
+2. 查询并锁定该用户的活动 Session，或使用带状态条件的原子批量更新。
+3. 将活动 Session 更新为 `revoked`，写入撤销时间和原因。
+4. 写入 Redis 撤销标记和审计记录。
+5. 提交事务并返回实际撤销数量。
+
+并发控制：使用悲观锁锁定目标用户，并对活动 Session 使用 `FOR UPDATE` 或条件批量更新，保证并发强制下线只由一个请求撤销每条 Session。重复请求返回 `revoked_sessions=0`。与并发登录之间还需要在创建 Session 时锁定同一用户行，或在 Session 创建前后重新校验用户状态，避免强制下线扫描结束后又生成新 Session。
 
 响应：
 
@@ -687,26 +730,59 @@ ForceLogoutResponse
 
 ## 10. 事务与并发规则
 
-所有修改操作使用数据库事务。
+所有修改操作都使用数据库事务，但不同接口采用不同的并发控制方式。
 
-推荐执行顺序：
+### 10.1 各接口锁策略
+
+| 接口 | 并发控制 | 说明 |
+| --- | --- | --- |
+| `GET /admin/users` | 不加锁 | 普通一致性读取，不阻塞管理写操作 |
+| `GET /admin/users/{user_id}` | 不加锁 | 普通一致性读取；需要最新数据时由客户端重新查询 |
+| `POST /admin/users` | 唯一约束，不使用用户行锁 | 目标行尚不存在；依赖邮箱唯一索引防止并发重复创建 |
+| `PATCH /admin/users/{user_id}` | 乐观锁 | 使用 `version` 条件更新，版本不一致返回 409 |
+| `POST /admin/users/{user_id}/disable` | 悲观锁 | 锁定目标用户行后检查状态、撤销 Session 并写审计 |
+| `POST /admin/users/{user_id}/enable` | 悲观锁 | 锁定后检查 `is_blacklisted`，避免与拉黑并发冲突 |
+| `POST /admin/users/{user_id}/blacklist` | 悲观锁 | 锁定后修改状态、撤销 Session 并写审计 |
+| `POST /admin/users/{user_id}/recover` | 悲观锁 | 锁定后解除拉黑，避免与并发拉黑互相覆盖 |
+| `POST /admin/users/{user_id}/reset-password` | 悲观锁 | 密码哈希在锁外生成，锁定后更新密码并撤销 Session |
+| `POST /admin/users/{user_id}/force-logout` | 悲观锁 | 锁定用户，并锁定或条件更新其活动 Session |
+
+### 10.2 悲观锁接口的执行顺序
 
 ```text
-校验管理员权限
-→ SELECT 用户 FOR UPDATE
-→ 校验状态转换
+校验管理员身份和权限
+→ 在事务外完成不依赖用户当前状态的耗时计算
+→ 开始事务并 SELECT 用户 FOR UPDATE
+→ 校验用户当前状态和操作约束
 → 修改用户和 Session
 → 写 Redis 撤销标记
 → 写审计记录
+→ commit / rollback 并释放行锁
+```
+
+### 10.3 乐观锁编辑接口的执行顺序
+
+```text
+校验管理员身份和权限
+→ 校验请求字段
+→ UPDATE users
+     SET ..., version = version + 1
+   WHERE id = :user_id AND version = :expected_version
+→ 受影响行为 0 时区分用户不存在或版本冲突
+→ 根据修改内容撤销 Session、写审计记录
 → commit
 ```
 
-重点规则：
+### 10.4 统一规则
 
-- 创建用户依赖邮箱唯一索引处理并发冲突。
-- 状态操作使用行锁或 `version` 防止并发覆盖。
+- 创建用户依赖邮箱唯一索引处理并发冲突；创建前查询只用于友好提示，不是并发安全保障。
+- 所有修改 `users` 行的接口都必须将 `version` 加 1，包括采用悲观锁的禁用、启用、拉黑、恢复和重置密码操作。这样并发的资料编辑会因旧版本返回冲突。
+- 幂等状态操作在发现目标状态已满足时返回 `changed=false`；没有实际修改用户行时不增加 `version`。
+- 管理操作锁目标用户行时，登录创建 Session 的流程也应锁定同一用户行或在创建前后重新校验状态，避免禁用或强制下线完成后又产生新 Session。
+- “最后一个有效管理员”属于跨多行约束，只锁目标用户行不够；应使用事务级 advisory lock、专用保护行或可序列化事务，将相关检查和修改串行化。
 - Redis 撤销成功但数据库事务失败时，最多导致用户被安全地提前下线。
 - 数据库提交成功但 Redis 写入失败时必须报警并重试；数据库 Session 状态仍应阻止认证中心继续接受该 Session。
+- 对多行加锁时必须保持统一顺序，例如先锁用户、再按 Session ID 升序锁 Session，降低死锁概率。
 - 每次请求记录现有 `X-Request-ID`，用于关联审计和错误日志。
 
 ---
@@ -832,371 +908,3 @@ ForceLogoutResponse
 - 不提供删除、角色分配、组织、MFA、设备和登录记录功能。
 - 所有敏感操作都可通过管理员、目标用户和 Request ID 追踪。
 - 现有 JWT、Refresh Token、RBAC 和注销机制保持兼容。
-
----
-
-## 15. `sessions` 扩展说明
-
-`sessions` 是数据库中的用户登录会话表，对应项目中的 `app/models/session.py`。用户登录成功后，系统会创建一条 Session，并将其中的 `sid` 写入 Access Token 和 Refresh Token。
-
-当前 Session 主要记录：
-
-```text
-id
-sid
-user_id
-status
-created_at
-```
-
-本方案建议增加：
-
-```text
-revoked_at              timestamp, nullable
-revoked_reason          varchar(64), nullable
-```
-
-### 字段用途
-
-- `revoked_at`：记录会话被撤销的时间。
-- `revoked_reason`：记录会话被撤销的原因。
-
-建议的撤销原因：
-
-```text
-user_disabled
-user_blacklisted
-password_reset
-admin_force_logout
-email_changed
-user_logout
-refresh_token_reuse
-```
-
-### 使用场景
-
-#### 管理员强制下线
-
-撤销目标用户全部活动 Session，并记录：
-
-```text
-status = revoked
-revoked_at = 当前时间
-revoked_reason = admin_force_logout
-```
-
-#### 禁用或拉黑用户
-
-除修改用户状态外，还要撤销该用户所有 Session，防止其继续使用已经登录的设备：
-
-```text
-revoked_reason = user_disabled
-```
-
-或：
-
-```text
-revoked_reason = user_blacklisted
-```
-
-#### 管理员重置密码
-
-密码重置后撤销旧会话，防止旧设备继续使用：
-
-```text
-revoked_reason = password_reset
-```
-
-#### 查询会话状态
-
-以后管理后台可以根据 `status` 查询用户当前活动会话数量，也可以根据 `revoked_at` 和 `revoked_reason` 排查用户为什么下线。
-
-### PostgreSQL 和 Redis 的分工
-
-项目同时使用 PostgreSQL 和 Redis 保存 Session 相关状态：
-
-| 存储 | 用途 |
-| --- | --- |
-| PostgreSQL `sessions` | 持久化会话记录、管理后台查询、撤销时间和原因、审计排查 |
-| Redis Session Key | 快速判断某个 `sid` 是否已被撤销 |
-
-撤销 Session 时，两边都要更新：
-
-```text
-PostgreSQL:
-sessions.status = revoked
-sessions.revoked_at = now
-sessions.revoked_reason = ...
-
-Redis:
-SESSION_PREFIX + sid = revoked
-```
-
-只更新 Redis 会导致数据库缺少管理记录；只更新数据库则可能无法及时阻止依赖 Redis 的认证检查。
-
-### 跨子应用的注意事项
-
-Access Token 是离线 JWT。如果子应用只校验 JWT 签名，不检查 `sid` 的 Session 状态，强制下线后旧 Access Token 可能继续使用到过期。
-
-如果要求跨子应用即时失效，子应用鉴权中间件需要根据 JWT 中的 `sid` 检查 Redis Session 状态，或调用统一 Token introspection 接口。否则应保持较短的 Access Token 有效期。
-
----
-
-## 16. 审计记录说明
-
-审计记录（Audit Record）是系统对重要操作行为的持久化留痕，用于回答：
-
-> 谁，在什么时间，从哪里，对哪个对象，执行了什么操作，结果如何？
-
-它主要用于：
-
-- 安全追踪
-- 管理员行为审查
-- 问题排查
-- 责任定位
-- 合规检查
-- 账号异常恢复
-
-审计记录不是普通运行日志，也不是业务数据。
-
-### 与普通日志的区别
-
-```text
-普通日志：程序发生了什么
-登录日志：用户如何登录
-审计记录：管理员对系统做了什么
-```
-
-例如：
-
-- 普通日志：Redis 请求超时。
-- 登录日志：用户登录失败。
-- 审计记录：管理员禁用了某个用户。
-
-### 用户管理中需要记录的操作
-
-```text
-user.created
-user.updated
-user.disabled
-user.enabled
-user.blacklisted
-user.recovered
-user.password_reset
-user.force_logout
-```
-
-例如，管理员禁用用户后，可以记录：
-
-```json
-{
-  "actor_user_id": 1,
-  "action": "user.disabled",
-  "target_type": "user",
-  "target_id": 1001,
-  "result": "success",
-  "reason": "员工离职",
-  "changes": {
-    "is_active": {
-      "from": true,
-      "to": false
-    }
-  },
-  "request_id": "req-abc-123",
-  "created_at": "2026-08-10T18:30:00Z"
-}
-```
-
-字段含义：
-
-| 字段 | 含义 |
-| --- | --- |
-| `actor_user_id` | 执行操作的管理员 |
-| `action` | 操作编码 |
-| `target_type` | 被操作对象类型，例如 `user` |
-| `target_id` | 被操作对象 ID |
-| `result` | `success` 或 `failure` |
-| `reason` | 操作原因或失败原因 |
-| `changes_json` | 修改前后的字段变化 |
-| `request_id` | HTTP 请求追踪 ID |
-| `created_at` | 操作时间 |
-
-建议额外保存经过脱敏或哈希处理的：
-
-```text
-ip_address
-user_agent
-```
-
-### 审计记录存储和权限
-
-- 关键管理员操作存入 PostgreSQL 的 `audit_events` 表。
-- 普通应用运行日志输出为 JSON，交给 Loki、ELK 或云日志平台保存。
-- 审计记录默认只允许查看，不允许普通管理员修改或删除。
-- 建议使用独立权限：
-
-```text
-audit:read
-```
-
-### 审计记录禁止保存的内容
-
-禁止保存：
-
-- 明文密码
-- 密码哈希
-- Access Token
-- Refresh Token
-- 验证码
-- JWT 私钥
-- SMTP 密码
-- API Secret
-- 完整 `Authorization` Header
-
-例如重置密码时，只记录：
-
-```json
-{
-  "action": "user.password_reset",
-  "target_id": 1001,
-  "result": "success",
-  "changes": {
-    "password_changed": true,
-    "revoked_sessions": 3
-  }
-}
-```
-
-### 用户管理操作与审计流程
-
-以拉黑用户为例：
-
-```text
-管理员发起拉黑请求
-→ 校验管理员身份和权限
-→ 查询并锁定目标用户
-→ 修改 is_blacklisted=true
-→ 撤销目标用户全部 Session
-→ 写入审计记录
-→ 提交数据库事务
-```
-
-最终可以追踪：
-
-```text
-哪个管理员
-在什么时间
-从哪个来源地址
-以什么请求 ID
-将哪个用户拉黑
-拉黑原因是什么
-撤销了多少个登录会话
-```
-
----
-
-## 17. 幂等操作说明
-
-### 17.1 什么是幂等
-
-幂等是指：
-
-> 对同一个目标重复执行相同操作一次或多次，最终状态与只执行一次相同。
-
-例如用户最初处于启用状态：
-
-```text
-第一次禁用：
-is_active: true → false
-撤销 3 个活动 Session
-
-第二次禁用：
-is_active: false → false
-没有新的 Session 需要撤销
-```
-
-第二次调用不应返回系统异常，也不应重复修改禁用时间、覆盖第一次禁用原因或重复执行业务副作用。可以返回：
-
-```json
-{
-  "id": 1001,
-  "is_active": false,
-  "changed": false,
-  "revoked_sessions": 0
-}
-```
-
-第一次执行则可以返回：
-
-```json
-{
-  "id": 1001,
-  "is_active": false,
-  "changed": true,
-  "revoked_sessions": 3
-}
-```
-
-幂等主要保证业务状态和核心副作用一致。第二次请求可以记录“重复操作、状态未变化”的审计记录，但不应把它记录成一次新的状态变更。
-
-### 17.2 为什么需要幂等
-
-管理员点击操作后，服务端可能已经完成修改，但响应因网络超时没有到达前端。前端重试时，如果接口具备幂等性，系统会返回当前状态，而不会重复执行操作。
-
-这样可以避免：
-
-- 前端重复点击导致异常。
-- 网关或客户端重试造成重复修改。
-- 禁用时间和原因被无意覆盖。
-- 重复发送通知。
-- 重复撤销会话。
-- 将已完成的操作误报为 500 错误。
-
-### 17.3 建议保持幂等的用户管理操作
-
-| 操作 | 接口示例 | 重复调用结果 |
-| --- | --- | --- |
-| 禁用用户 | `POST /admin/users/{id}/disable` | 保持禁用，`changed=false` |
-| 启用用户 | `POST /admin/users/{id}/enable` | 保持启用，`changed=false` |
-| 拉黑用户 | `POST /admin/users/{id}/blacklist` | 保持拉黑，`changed=false` |
-| 恢复用户 | `POST /admin/users/{id}/recover` | 保持未拉黑，`changed=false` |
-| 强制下线 | `POST /admin/users/{id}/force-logout` | `revoked_sessions=0` |
-
-具体规则：
-
-- 禁用：保留第一次禁用时间和原因，不重复撤销已经撤销的 Session。
-- 启用：保持启用，不恢复旧 Session，也不重复发送通知；如果用户仍被拉黑，稳定返回 `409 USER_BLACKLISTED`。
-- 拉黑：保留第一次拉黑时间和原因，不重复撤销 Session。
-- 恢复：保持未拉黑，不修改 `is_active`，不恢复已撤销 Session。
-- 强制下线：第一次返回实际撤销数量，重复调用返回 `revoked_sessions=0`。
-
-### 17.4 其他操作的幂等性
-
-| 操作 | 是否建议幂等 | 说明 |
-| --- | --- | --- |
-| 用户登出 | 建议 | 已退出的会话可以继续返回登出成功 |
-| 新增用户 | 默认不建议 | 重复邮箱返回 409；需要安全重试时使用 `Idempotency-Key` |
-| 编辑用户 | 部分 | 相同目标值不重复改变；使用 `version` 时可能返回版本冲突 |
-| 重置密码 | 默认不建议 | 可能更新时间、撤销会话和发送通知；需要安全重试时使用 `Idempotency-Key` |
-| 登录 | 不建议 | 每次成功登录通常创建新的 Session 和 Token |
-| Refresh Token | 不建议 | 轮换后的旧 Token 重复提交应按重放处理 |
-
-### 17.5 Idempotency-Key
-
-对于新增用户和重置密码等可能因网络重试而重复执行的非幂等操作，可以支持：
-
-```http
-Idempotency-Key: random-request-id
-```
-
-服务端按“操作人 + 操作类型 + Idempotency-Key”保存首次请求结果。相同 Key 再次提交时返回首次结果，不重复创建用户、修改密码或发送通知。
-
-幂等键应设置过期时间，并校验同一个 Key 不能用于不同请求内容，避免错误复用。
-
-### 17.6 实现注意事项
-
-- 状态变更接口应使用目标状态语义，而不是“切换状态”语义；避免设计 `toggle-disable` 这类接口。
-- 需要保留首次操作时间和原因时，重复请求不能覆盖原值。
-- 数据库状态更新和 Session 撤销应放在同一业务事务中处理。
-- Redis 写入应使用幂等的 `set` 操作，并设置合理 TTL。
-- 审计记录应区分“状态发生变化”和“重复请求但状态未变化”。
