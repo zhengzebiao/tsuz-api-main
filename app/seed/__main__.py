@@ -17,7 +17,15 @@ DEFAULT_ADMIN_PASSWORD = "password123"
 DEFAULT_ROLE = "admin"
 DEFAULT_PERMISSIONS = {
     "user:read": "Read current user profile data",
-    "user:write": "Update user profile data",
+    "user:write": "Update current user profile data",
+    "user:create": "Create users",
+    "user:update": "Update user profile data",
+    "user:disable": "Disable users",
+    "user:enable": "Enable users",
+    "user:blacklist": "Blacklist users",
+    "user:recover": "Recover blacklisted users",
+    "user:reset_password": "Reset user passwords",
+    "user:force_logout": "Force users to log out",
 }
 
 

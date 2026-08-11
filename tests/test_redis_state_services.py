@@ -21,8 +21,10 @@ class FakeRedis:
     def exists(self, key: str) -> bool:
         return key in self.values
 
-    def set(self, key: str, value: str) -> None:
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.values[key] = value
+        if ex is not None:
+            self.expirations[key] = ex
 
     def get(self, key: str) -> str | None:
         return self.values.get(key)
@@ -51,6 +53,8 @@ def test_blacklist_service_uses_configured_prefix_and_access_token_ttl(fake_redi
 def test_session_service_uses_configured_prefix_for_revocation(fake_redis: FakeRedis) -> None:
     SessionService().revoke_session("sid-123")
 
-    assert fake_redis.values[f"{settings.session_prefix}sid-123"] == "revoked"
+    key = f"{settings.session_prefix}sid-123"
+    assert fake_redis.values[key] == "revoked"
+    assert fake_redis.expirations[key] == settings.refresh_token_expire_days * 24 * 60 * 60
     with pytest.raises(ValueError, match="session is revoked"):
         SessionService().ensure_session_active("sid-123")

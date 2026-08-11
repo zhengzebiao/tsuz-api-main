@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from typing import Any
 
+from sqlalchemy.orm import Session as DbSession
+
 from app.core.config import settings
 from app.core.security import sha256_text
 from app.core.redis import get_redis
@@ -18,8 +20,8 @@ class RefreshTokenReuseError(ValueError):
 
 
 class RefreshTokenService:
-    def __init__(self) -> None:
-        self.sessions = SessionService()
+    def __init__(self, db: DbSession | None = None) -> None:
+        self.sessions = SessionService(db)
 
     def create_refresh_token(self, user_id: str, sid: str) -> str:
         refresh_token = token_urlsafe(48)
@@ -78,15 +80,15 @@ class RefreshTokenService:
                 logger.warning("refresh replay within grace sid=%s", sid)
                 raise ValueError("refresh token already rotated")
             if sid:
-                self.revoke_session(sid)
+                self.revoke_session(sid, reason="refresh_token_reuse")
             logger.warning("refresh reuse detected sid=%s", sid)
             raise RefreshTokenReuseError(sid)
 
         logger.warning("refresh rejected reason=status_%s sid=%s", status, sid)
         raise ValueError("invalid refresh token")
 
-    def revoke_session(self, sid: str) -> None:
-        self.sessions.revoke_session(sid)
+    def revoke_session(self, sid: str, reason: str = "user_logout") -> None:
+        self.sessions.revoke_session(sid, reason)
 
     def ensure_session_active(self, sid: str) -> None:
         self.sessions.ensure_session_active(sid)

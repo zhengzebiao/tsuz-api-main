@@ -1,24 +1,18 @@
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session as DbSession
 
+from app.api.dependencies import require_access_token, security
 from app.core.database import get_db
 from app.schemas.auth import LoginRequest, LogoutResponse, RefreshTokenRequest, TokenResponse, UserResponse
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-security = HTTPBearer(auto_error=False)
 
 
 def _unauthorized(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
-
-
-def _require_access_token(credentials: HTTPAuthorizationCredentials | None) -> str:
-    if credentials is None:
-        raise _unauthorized("invalid access token")
-    return credentials.credentials
 
 
 @router.post(
@@ -59,7 +53,7 @@ def logout(
     db: DbSession = Depends(get_db),
 ) -> LogoutResponse:
     try:
-        return AuthService(db).logout(_require_access_token(credentials))
+        return AuthService(db).logout(require_access_token(credentials))
     except (jwt.PyJWTError, ValueError) as exc:
         raise _unauthorized("invalid access token") from exc
 
@@ -75,6 +69,6 @@ def me(
     db: DbSession = Depends(get_db),
 ) -> UserResponse:
     try:
-        return AuthService(db).current_user(_require_access_token(credentials))
+        return AuthService(db).current_user(require_access_token(credentials))
     except (jwt.PyJWTError, ValueError) as exc:
         raise _unauthorized("invalid access token") from exc

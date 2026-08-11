@@ -13,6 +13,7 @@ from app.models.session import Session as AuthSession
 from app.models.user import User
 from app.schemas.auth import LoginRequest
 from app.services.auth_service import AuthService
+from app.services.authorization_service import AuthenticationError
 from app.services.refresh_token_service import RefreshTokenReuseError
 
 
@@ -80,8 +81,19 @@ def db_session() -> Iterator[DbSession]:
         engine.dispose()
 
 
-def create_user_with_rbac(db: DbSession, *, active: bool = True, password: str = "password123") -> User:
-    user = User(email="admin@example.com", hashed_password=hash_password(password), is_active=active)
+def create_user_with_rbac(
+    db: DbSession,
+    *,
+    active: bool = True,
+    blacklisted: bool = False,
+    password: str = "password123",
+) -> User:
+    user = User(
+        email="admin@example.com",
+        hashed_password=hash_password(password),
+        is_active=active,
+        is_blacklisted=blacklisted,
+    )
     role = Role(name="admin")
     read_permission = Permission(name="user:read", description="Read current user")
     write_permission = Permission(name="user:write", description="Write current user")
@@ -157,6 +169,15 @@ def test_login_rejects_inactive_user(db_session: DbSession) -> None:
         service.login(LoginRequest(username="admin@example.com", password="password123"))
 
 
+def test_login_rejects_blacklisted_user(db_session: DbSession) -> None:
+    create_user_with_rbac(db_session, blacklisted=True)
+    service = AuthService(db_session)
+    attach_service_fakes(service)
+
+    with pytest.raises(ValueError, match="invalid credentials"):
+        service.login(LoginRequest(username="admin@example.com", password="password123"))
+
+
 def test_refresh_uses_db_user_session_and_rbac_claims(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
     db_session.add(AuthSession(sid="sid-refresh", user_id=user.id, status="active"))
@@ -174,6 +195,27 @@ def test_refresh_uses_db_user_session_and_rbac_claims(db_session: DbSession) -> 
     assert tokens.created == [
         {"user_id": str(user.id), "sid": "sid-refresh", "roles": ["admin"], "scope": "user:read user:write"}
     ]
+
+
+def test_refresh_rejects_blacklisted_user_and_revokes_session(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session, blacklisted=True)
+    db_session.add(AuthSession(sid="sid-blacklisted", user_id=user.id, status="active"))
+    db_session.commit()
+    service = AuthService(db_session)
+    attach_service_fakes(
+        service,
+        rotation={"user_id": str(user.id), "sid": "sid-blacklisted", "refresh_token": "new-refresh-token"},
+    )
+
+    with pytest.raises(ValueError, match="invalid user"):
+        service.refresh("refresh")
+
+    db_session.expire_all()
+    auth_session = db_session.scalar(select(AuthSession).where(AuthSession.sid == "sid-blacklisted"))
+    assert auth_session is not None
+    assert auth_session.status == "revoked"
+    assert auth_session.revoked_reason == "authentication_state_changed"
+    assert auth_session.revoked_at is not None
 
 
 def test_refresh_reuse_revokes_db_session(db_session: DbSession) -> None:
@@ -198,6 +240,8 @@ def test_refresh_reuse_revokes_db_session(db_session: DbSession) -> None:
     auth_session = db_session.scalar(select(AuthSession).where(AuthSession.sid == "sid-reuse"))
     assert auth_session is not None
     assert auth_session.status == "revoked"
+    assert auth_session.revoked_reason == "refresh_token_reuse"
+    assert auth_session.revoked_at is not None
 
 
 def test_current_user_returns_db_email_and_roles(db_session: DbSession) -> None:
@@ -214,7 +258,19 @@ def test_current_user_returns_db_email_and_roles(db_session: DbSession) -> None:
     assert response.username == "admin@example.com"
     assert response.roles == ["admin"]
     assert blacklist.checked == ["jti-current"]
-    assert refresh_tokens.session_checks == ["sid-current"]
+    assert refresh_tokens.session_checks == []
+
+
+def test_current_user_rejects_blacklisted_user(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session, blacklisted=True)
+    db_session.add(AuthSession(sid="sid-current", user_id=user.id, status="active"))
+    db_session.commit()
+    service = AuthService(db_session)
+    token_payload = {"sub": str(user.id), "jti": "jti-current", "sid": "sid-current", "exp": 4_102_444_800}
+    attach_service_fakes(service, token_payload=token_payload)
+
+    with pytest.raises(AuthenticationError, match="invalid user"):
+        service.current_user("access")
 
 
 def test_current_user_rejects_revoked_db_session(db_session: DbSession) -> None:
@@ -241,11 +297,13 @@ def test_logout_blacklists_jti_revokes_redis_and_db_session(db_session: DbSessio
 
     assert response.message == "logged out"
     assert blacklist.added == [("jti-logout", 4_102_444_800)]
-    assert refresh_tokens.revoked == ["sid-logout"]
+    assert refresh_tokens.revoked == []
     db_session.expire_all()
     auth_session = db_session.scalar(select(AuthSession).where(AuthSession.sid == "sid-logout"))
     assert auth_session is not None
     assert auth_session.status == "revoked"
+    assert auth_session.revoked_reason == "user_logout"
+    assert auth_session.revoked_at is not None
 
 
 def test_logout_logs_without_raw_access_token(db_session: DbSession, caplog) -> None:

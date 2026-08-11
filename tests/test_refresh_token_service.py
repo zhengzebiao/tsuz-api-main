@@ -25,8 +25,10 @@ class FakeRedis:
     def expire(self, key: str, ttl: int) -> None:
         self.expirations[key] = ttl
 
-    def set(self, key: str, value: str) -> None:
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.values[key] = value
+        if ex is not None:
+            self.expirations[key] = ex
 
     def get(self, key: str) -> str | None:
         return self.values.get(key)
