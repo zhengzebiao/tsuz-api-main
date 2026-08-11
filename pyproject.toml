@@ -37,6 +37,7 @@ migrate = "alembic upgrade head"
 alembic-current = "alembic current"
 seed = "python -m app.seed"
 init = "python -m scripts.init_local"
+phase4-validate = "python scripts/validate_phase_4.py"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
