@@ -24,7 +24,7 @@ def test_phase4_alembic_roundtrip_preserves_legacy_data(phase4_config: Phase4Con
     assert report["legacy_user_preserved"] is True
     assert report["legacy_session_preserved"] is True
     assert report["alembic_check"] == "clean"
-    assert report["current_revision"] == "0003_app_management"
+    assert report["current_revision"] == "0004_role_management"
 
 
 def test_phase4_management_flow_verifies_postgres_redis_and_http(phase4_config: Phase4Config) -> None:
