@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+from secrets import token_hex, token_urlsafe
 
 from passlib.context import CryptContext
 
@@ -19,3 +21,19 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def generate_app_id() -> str:
+    return f"app_{token_hex(16)}"
+
+
+def generate_app_secret() -> str:
+    return f"app_secret_{token_urlsafe(32)}"
+
+
+def hash_app_secret(app_secret: str) -> str:
+    return sha256_text(app_secret)
+
+
+def verify_app_secret(app_secret: str, expected_hash: str) -> bool:
+    return hmac.compare_digest(hash_app_secret(app_secret), expected_hash)
