@@ -39,6 +39,14 @@ def test_seed_adds_all_admin_permissions_idempotently(db_session: DbSession) -> 
         ).all()
     )
     assert permission_names == set(DEFAULT_PERMISSIONS)
+    assert {
+        "app:read",
+        "app:create",
+        "app:update",
+        "app:enable",
+        "app:disable",
+        "app:regenerate_secret",
+    } <= permission_names
     assert "user:write" in permission_names
     assert db_session.scalar(select(func.count()).select_from(Permission)) == len(DEFAULT_PERMISSIONS)
     assert db_session.scalar(select(func.count()).select_from(role_permissions)) == len(DEFAULT_PERMISSIONS)

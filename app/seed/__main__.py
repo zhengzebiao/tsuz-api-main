@@ -16,6 +16,12 @@ DEFAULT_ADMIN_EMAIL = "admin@example.com"
 DEFAULT_ADMIN_PASSWORD = "password123"
 DEFAULT_ROLE = "admin"
 DEFAULT_PERMISSIONS = {
+    "app:read": "Read apps",
+    "app:create": "Create apps",
+    "app:update": "Update app profile data",
+    "app:enable": "Enable apps",
+    "app:disable": "Disable apps",
+    "app:regenerate_secret": "Regenerate app secrets",
     "user:read": "Read current user profile data",
     "user:write": "Update current user profile data",
     "user:create": "Create users",

@@ -1,3 +1,4 @@
+from app.api.admin_apps import router as admin_apps_router
 from app.api.admin_users import router as admin_users_router
 from app.api.auth import router as feature_router
 from app.api.health import router as health_router
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(feature_router)
     app.include_router(admin_users_router)
+    app.include_router(admin_apps_router)
     return app
 
 
