@@ -18,13 +18,14 @@ _redacting_factory_configured = False
 _PEM_KEY_RE = re.compile(r"-----BEGIN [A-Z ]*KEY-----.*?-----END [A-Z ]*KEY-----", re.DOTALL)
 _BEARER_RE = re.compile(r"(?i)Authorization:\s*Bearer\s+[^\s,;]+")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+_APP_SECRET_RE = re.compile(r"\bapp_secret_(?!hash\b)[A-Za-z0-9_-]{16,}\b")
 _FIELD_RE = re.compile(
-    r"(?i)\b(password|access_token|refresh_token|jwt_private_key|jwt_public_key|github_[a-z0-9_]*secret)"
-    r"\s*[=:]\s*([^\s,;]+)"
+    r"(?i)\b(password|access_token|refresh_token|app_secret|app_secret_hash|jwt_private_key|jwt_public_key|"
+    r"github_[a-z0-9_]*secret)\s*[=:]\s*([^\s,;]+)"
 )
 _JSON_FIELD_RE = re.compile(
-    r'(?i)("(?:password|access_token|refresh_token|jwt_private_key|jwt_public_key|github_[a-z0-9_]*secret)"\s*:\s*")'
-    r'([^"]+)(")'
+    r'(?i)("(?:password|access_token|refresh_token|app_secret|app_secret_hash|jwt_private_key|jwt_public_key|'
+    r'github_[a-z0-9_]*secret)"\s*:\s*")([^"]+)(")'
 )
 _URL_PASSWORD_RE = re.compile(r"\b((?:postgresql(?:\+psycopg)?|redis)://[^:\s/@]+):[^@\s]+@")
 
@@ -35,6 +36,7 @@ def redact_sensitive(value: object) -> object:
     redacted = _PEM_KEY_RE.sub("[REDACTED_KEY]", value)
     redacted = _BEARER_RE.sub("Authorization: Bearer [REDACTED]", redacted)
     redacted = _JWT_RE.sub("[REDACTED_JWT]", redacted)
+    redacted = _APP_SECRET_RE.sub("[REDACTED_APP_SECRET]", redacted)
     redacted = _JSON_FIELD_RE.sub(r"\1[REDACTED]\3", redacted)
     redacted = _FIELD_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
     redacted = _URL_PASSWORD_RE.sub(r"\1:[REDACTED]@", redacted)

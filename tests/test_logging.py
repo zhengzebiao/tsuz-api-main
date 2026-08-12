@@ -60,3 +60,21 @@ def test_redact_sensitive_handles_json_and_env_style_secrets() -> None:
     assert "secret" not in redacted
     assert "redis_password" not in redacted
     assert "[REDACTED" in redacted
+
+
+def test_redact_sensitive_handles_app_secrets_and_hashes() -> None:
+    app_secret = "app_secret_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+    app_secret_hash = "a" * 64
+    message = (
+        f'app_secret={app_secret} app_secret_hash={app_secret_hash} '
+        f'{{"app_secret":"{app_secret}", "app_secret_hash":"{app_secret_hash}"}} '
+        f"unlabeled credential {app_secret}"
+    )
+
+    redacted = redact_sensitive(message)
+
+    assert app_secret not in redacted
+    assert app_secret_hash not in redacted
+    assert "[REDACTED_APP_SECRET]" in redacted
+    assert "app_secret=[REDACTED]" in redacted
+    assert "app_secret_hash=[REDACTED]" in redacted
