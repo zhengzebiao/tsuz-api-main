@@ -84,7 +84,8 @@
 - 新增子应用；✅
 - 编辑子应用信息；✅
 - 启用、禁用子应用；✅
-- 配置应用名称、图标和访问地址；✅
+- 配置应用名称、图标、访问地址、和服务账号；✅
+- App Secret重新生成；✅
 - 配置应用编码；
 - 配置菜单或入口；
 - 配置回调地址；
@@ -105,14 +106,14 @@
 
 如果子应用需要调用主应用或被主应用调用，还需要管理：
 
-- Client ID；
-- Client Secret；
+- App ID；
+- App Secret；
 - 服务账号；
 - OAuth 回调地址；
 - Token Scope；
 - 密钥轮换和吊销。
 
-`Client Secret` 只应在创建时显示一次，不能在列表中明文展示。
+`App Secret` 只应在创建时显示一次，不能在列表中明文展示。
 
 ### 4. 权限管理 Permission
 
@@ -325,8 +326,8 @@ python-main -> python-app
 需要管理：
 
 - 服务账号；
-- Client ID；
-- Client Secret；
+- App ID；
+- App Secret；
 - API Key；
 - 允许访问的接口；
 - Scope；
