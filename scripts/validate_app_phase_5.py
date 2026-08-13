@@ -244,6 +244,14 @@ def _seed(env: dict[str, str]) -> None:
     )
 
 
+def _sync_permissions(env: dict[str, str]) -> None:
+    _run_command(
+        (sys.executable, "-m", "app.commands.sync_permissions"),
+        env=env,
+        secrets=_database_secrets(env["DATABASE_URL"]),
+    )
+
+
 def _clean_redis_namespace(redis_client: Redis, prefix: str) -> int:
     deleted = 0
     batch: list[str] = []
@@ -689,7 +697,7 @@ def _create_permission_users(database_url: str) -> dict[str, dict[str, str]]:
 
             for permission_name in APP_PERMISSIONS:
                 permission = db.scalar(select(Permission).where(Permission.name == permission_name))
-                _assert(permission is not None, f"seed did not create {permission_name}")
+                _assert(permission is not None, f"permission sync did not create {permission_name}")
                 slug = permission_name.replace(":", "_")
                 role = Role(name=f"app_phase5_{slug}_{uuid4().hex[:6]}")
                 user = User(
@@ -989,6 +997,7 @@ def run_http_validation(config: AppPhase5Config) -> dict[str, Any]:
         _alembic(database.url, "upgrade", "head")
         _seed(env)
         _seed(env)
+        _sync_permissions(env)
         permission_users = _create_permission_users(database.url)
         engine = create_engine(database.url, poolclass=NullPool)
         port = config.api_port or _find_available_port(config.api_host)

@@ -37,7 +37,7 @@ pdm run init
 1. Checks Docker Compose and OpenSSL are installed.
 2. Creates `.env` from `.env.local.example` if it does not already exist.
 3. Generates a local RSA-2048 JWT key pair and stores it only in `.env` with mode `0600`.
-4. Starts PostgreSQL and Redis, waits for healthy containers, builds the API image, applies Alembic migrations, and runs the idempotent local seed. If Docker Hub is temporarily unavailable and a prior local image exists, initialization warns and falls back to that image; otherwise retry after `docker pull python:3.12-slim` succeeds.
+4. Starts PostgreSQL and Redis, waits for healthy containers, builds the API image, applies Alembic migrations, runs the idempotent local admin seed, and synchronizes the API permission declarations into PostgreSQL. If Docker Hub is temporarily unavailable and a prior local image exists, initialization warns and falls back to that image; otherwise retry after `docker pull python:3.12-slim` succeeds.
 5. Starts the API and nginx and checks both `http://127.0.0.1:8000/health` and `http://127.0.0.1:8080/health`.
 
 The command is safe to repeat: an existing `.env` is validated and never overwritten, and migrations/seed do not duplicate existing data. It is a host-side command because it controls Docker; do not run `pdm run init` from inside the API container.
@@ -139,12 +139,13 @@ This template uses PDM with standard `pyproject.toml` metadata.
 
 ## Database Migrations and Seed
 
-- `pdm run init` runs the local migration and seed inside one-off API containers after PostgreSQL and Redis become healthy.
+- `pdm run init` runs the local migration, admin seed, and permission synchronization inside one-off API containers after PostgreSQL and Redis become healthy.
 - Use `pdm run alembic-current` to inspect the active revision when running the app with a host-side environment.
 - Use `pdm run migrate` to apply Alembic migrations manually only when your active environment points to reachable services. For the Compose workflow, run the equivalent command with `docker compose run --rm --no-deps api alembic upgrade head`.
 - Use `alembic downgrade -1` or `alembic downgrade <revision_id>` only for development, test, or pre-release rollback drills.
-- The local seed is idempotent and ensures the default admin user, admin role, and starter permissions exist without duplicating rows. The seeded credentials are for local development only; inspect `app/seed.py` before using them.
-- Product does not auto-run seed; execute it manually only after reviewing the target environment.
+- The local seed is idempotent and only ensures the default admin user, admin role, and their user-role association. API permissions come exclusively from `require_permissions(...)` declarations and are created or updated by `pdm run permission-sync`.
+- Product does not auto-run seed or permission synchronization. Run migration, reviewed admin bootstrap if needed, `permission-sync --dry-run`, `permission-sync`, and `permission-sync --check` as separate reviewed operations before starting the new application version.
+- The first production dry run must explicitly review historical permissions that are no longer declared, including the current legacy `user:write`; synchronization marks these permissions missing but does not delete their IDs or role associations.
 - Prefer immutable image rollback and forward-compatible repair migrations over relying on product database downgrade.
 
 ## Logging and Request ID
@@ -353,9 +354,9 @@ docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic
 
 Deploy and rollback do not run migrations automatically.
 
-### Seed Policy
+### Seed and Permission Synchronization Policy
 
-Product does not auto-run seed. The Migrate workflow also does not run seed. Use `pdm run seed` for local development, and execute product seed only as an explicit reviewed operation after confirming it is idempotent and safe for real data.
+Product does not auto-run seed or permission synchronization. The Migrate workflow also runs neither operation. `pdm run seed` only creates the default admin identity and role association; it does not create API permissions. Use `pdm run permission-sync --dry-run` to review changes, run `pdm run permission-sync` to apply them under a PostgreSQL advisory lock, then run `pdm run permission-sync --check` to confirm the database matches the deployed route declarations. These remain explicit reviewed deployment steps and are intentionally not part of automatic deploy or rollback workflows.
 
 
 ## Scripts
@@ -367,10 +368,13 @@ pdm run test
 pdm run lint
 pdm run migrate
 pdm run seed
+pdm run permission-sync --dry-run
+pdm run permission-sync
+pdm run permission-sync --check
 pdm run alembic-current
 ```
 
-`pdm run init -- --timeout 180` forwards the timeout option to the initialization script. `init` is for local Docker development only; deployment migrations and seed operations remain explicit reviewed steps.
+`pdm run init -- --timeout 180` forwards the timeout option to the initialization script. `init` is for local Docker development only; deployment migrations, admin Seed, and permission synchronization remain explicit reviewed steps.
 
 ## Project Structure
 

@@ -256,6 +256,19 @@ def initialize_local(*, timeout_seconds: float = 120) -> None:
     ensure_api_image()
     run_command(("docker", "compose", "run", "--rm", "--no-deps", "api", "python", "-m", "alembic", "upgrade", "head"))
     run_command(("docker", "compose", "run", "--rm", "--no-deps", "api", "python", "-m", "app.seed"))
+    run_command(
+        (
+            "docker",
+            "compose",
+            "run",
+            "--rm",
+            "--no-deps",
+            "api",
+            "python",
+            "-m",
+            "app.commands.sync_permissions",
+        )
+    )
     run_command(("docker", "compose", "up", "-d", "--no-build", "api", "nginx"))
     wait_for_compose_services(("api", "nginx"), timeout_seconds=timeout_seconds)
     wait_for_health(API_HEALTH_URL, timeout_seconds=timeout_seconds)

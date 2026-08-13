@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core.logging import configure_logging
 from app.core.security import hash_password
-from app.models.permission import Permission
-from app.models.role import Role, role_permissions, user_roles
+from app.models.role import Role, user_roles
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -15,30 +14,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_ADMIN_EMAIL = "admin@example.com"
 DEFAULT_ADMIN_PASSWORD = "password123"
 DEFAULT_ROLE = "admin"
-DEFAULT_PERMISSIONS = {
-    "app:read": "Read apps",
-    "app:create": "Create apps",
-    "app:update": "Update app profile data",
-    "app:enable": "Enable apps",
-    "app:disable": "Disable apps",
-    "app:regenerate_secret": "Regenerate app secrets",
-    "user:read": "Read current user profile data",
-    "user:write": "Update current user profile data",
-    "user:create": "Create users",
-    "user:update": "Update user profile data",
-    "user:disable": "Disable users",
-    "user:enable": "Enable users",
-    "user:blacklist": "Blacklist users",
-    "user:recover": "Recover blacklisted users",
-    "user:reset_password": "Reset user passwords",
-    "user:force_logout": "Force users to log out",
-    "user:assign_roles": "Assign roles to users",
-    "role:read": "Read roles and role users",
-    "role:create": "Create roles",
-    "role:update": "Update roles",
-    "role:disable": "Disable roles",
-    "role:enable": "Enable roles",
-}
 
 
 def ensure_admin_user(db: Session) -> User:
@@ -65,20 +40,13 @@ def ensure_role(db: Session, name: str) -> Role:
     return role
 
 
-def ensure_permission(db: Session, name: str, description: str) -> Permission:
-    permission = db.scalar(select(Permission).where(Permission.name == name))
-    if permission is not None:
-        logger.info("seed skipped existing permission name=%s", name)
-        return permission
-    permission = Permission(name=name, description=description)
-    db.add(permission)
-    db.flush()
-    logger.info("seed created permission name=%s", name)
-    return permission
-
-
 def ensure_user_role(db: Session, user: User, role: Role) -> None:
-    exists = db.execute(select(user_roles.c.user_id).where(user_roles.c.user_id == user.id, user_roles.c.role_id == role.id)).first()
+    exists = db.execute(
+        select(user_roles.c.user_id).where(
+            user_roles.c.user_id == user.id,
+            user_roles.c.role_id == role.id,
+        )
+    ).first()
     if exists is not None:
         logger.info("seed skipped existing user role user_id=%s role=%s", user.id, role.name)
         return
@@ -86,28 +54,11 @@ def ensure_user_role(db: Session, user: User, role: Role) -> None:
     logger.info("seed attached role user_id=%s role=%s", user.id, role.name)
 
 
-def ensure_role_permission(db: Session, role: Role, permission: Permission) -> None:
-    exists = db.execute(
-        select(role_permissions.c.role_id).where(
-            role_permissions.c.role_id == role.id,
-            role_permissions.c.permission_id == permission.id,
-        )
-    ).first()
-    if exists is not None:
-        logger.info("seed skipped existing role permission role=%s permission=%s", role.name, permission.name)
-        return
-    db.execute(role_permissions.insert().values(role_id=role.id, permission_id=permission.id))
-    logger.info("seed attached permission role=%s permission=%s", role.name, permission.name)
-
-
 def seed(db: Session) -> None:
     logger.info("seed started target=python-main")
     admin = ensure_admin_user(db)
     role = ensure_role(db, DEFAULT_ROLE)
     ensure_user_role(db, admin, role)
-    for permission_name, description in DEFAULT_PERMISSIONS.items():
-        permission = ensure_permission(db, permission_name, description)
-        ensure_role_permission(db, role, permission)
     logger.info("seed completed target=python-main")
 
 

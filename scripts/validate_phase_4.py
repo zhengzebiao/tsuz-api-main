@@ -182,6 +182,14 @@ def _seed(env: dict[str, str]) -> None:
     )
 
 
+def _sync_permissions(env: dict[str, str]) -> None:
+    _run_command(
+        (sys.executable, "-m", "app.commands.sync_permissions"),
+        env=env,
+        secrets=_database_secrets(env["DATABASE_URL"]),
+    )
+
+
 def _database_url_for(admin_database_url: str, database_name: str) -> str:
     url = make_url(admin_database_url).set(database=database_name)
     return url.render_as_string(hide_password=False)
@@ -836,6 +844,7 @@ def run_management_flow(config: Phase4Config) -> dict[str, Any]:
         _alembic(database.url, "upgrade", "head")
         _seed(env)
         _seed(env)
+        _sync_permissions(env)
 
         port = config.api_port or _find_available_port(config.api_host)
         base_url = f"http://{config.api_host}:{port}"
