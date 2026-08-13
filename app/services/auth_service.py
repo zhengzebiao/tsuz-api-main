@@ -126,7 +126,10 @@ class AuthService:
         roles = self.db.scalars(
             select(Role.name)
             .join(user_roles, user_roles.c.role_id == Role.id)
-            .where(user_roles.c.user_id == user_id)
+            .where(
+                user_roles.c.user_id == user_id,
+                Role.is_enabled.is_(True),
+            )
             .order_by(Role.name)
         ).all()
         return list(roles)
@@ -136,8 +139,12 @@ class AuthService:
             select(Permission.name)
             .distinct()
             .join(role_permissions, role_permissions.c.permission_id == Permission.id)
-            .join(user_roles, user_roles.c.role_id == role_permissions.c.role_id)
-            .where(user_roles.c.user_id == user_id)
+            .join(Role, Role.id == role_permissions.c.role_id)
+            .join(user_roles, user_roles.c.role_id == Role.id)
+            .where(
+                user_roles.c.user_id == user_id,
+                Role.is_enabled.is_(True),
+            )
             .order_by(Permission.name)
         ).all()
         return list(permissions)

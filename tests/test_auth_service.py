@@ -106,6 +106,21 @@ def create_user_with_rbac(
     return user
 
 
+def attach_disabled_role_with_permission(db: DbSession, user: User) -> None:
+    disabled_role = Role(name="archived-admin", is_enabled=False)
+    disabled_permission = Permission(name="role:disable", description="Must not enter scope")
+    db.add_all([disabled_role, disabled_permission])
+    db.flush()
+    db.execute(user_roles.insert().values(user_id=user.id, role_id=disabled_role.id))
+    db.execute(
+        role_permissions.insert().values(
+            role_id=disabled_role.id,
+            permission_id=disabled_permission.id,
+        )
+    )
+    db.commit()
+
+
 def attach_service_fakes(service: AuthService, *, token_payload: dict | None = None, rotation: dict | None = None):
     tokens = RecordingTokenService(payload=token_payload)
     refresh_tokens = RecordingRefreshTokenService(rotation=rotation)
@@ -135,6 +150,18 @@ def test_login_uses_db_user_password_and_rbac_claims(db_session: DbSession) -> N
     assert auth_session is not None
     assert auth_session.sid == sid
     assert auth_session.status == "active"
+
+
+def test_login_excludes_disabled_roles_and_permissions_from_claims(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session)
+    attach_disabled_role_with_permission(db_session, user)
+    service = AuthService(db_session)
+    tokens, _refresh_tokens, _blacklist = attach_service_fakes(service)
+
+    service.login(LoginRequest(username="admin@example.com", password="password123"))
+
+    assert tokens.created[0]["roles"] == ["admin"]
+    assert tokens.created[0]["scope"] == "user:read user:write"
 
 
 def test_login_rejects_wrong_password(db_session: DbSession) -> None:
@@ -195,6 +222,27 @@ def test_refresh_uses_db_user_session_and_rbac_claims(db_session: DbSession) -> 
     assert tokens.created == [
         {"user_id": str(user.id), "sid": "sid-refresh", "roles": ["admin"], "scope": "user:read user:write"}
     ]
+
+
+def test_refresh_excludes_disabled_roles_and_permissions_from_claims(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session)
+    attach_disabled_role_with_permission(db_session, user)
+    db_session.add(AuthSession(sid="sid-filtered-refresh", user_id=user.id, status="active"))
+    db_session.commit()
+    service = AuthService(db_session)
+    tokens, _refresh_tokens, _blacklist = attach_service_fakes(
+        service,
+        rotation={
+            "user_id": str(user.id),
+            "sid": "sid-filtered-refresh",
+            "refresh_token": "new-refresh-token",
+        },
+    )
+
+    service.refresh("refresh")
+
+    assert tokens.created[0]["roles"] == ["admin"]
+    assert tokens.created[0]["scope"] == "user:read user:write"
 
 
 def test_refresh_rejects_blacklisted_user_and_revokes_session(db_session: DbSession) -> None:
@@ -259,6 +307,25 @@ def test_current_user_returns_db_email_and_roles(db_session: DbSession) -> None:
     assert response.roles == ["admin"]
     assert blacklist.checked == ["jti-current"]
     assert refresh_tokens.session_checks == []
+
+
+def test_current_user_excludes_disabled_roles(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session)
+    attach_disabled_role_with_permission(db_session, user)
+    db_session.add(AuthSession(sid="sid-filtered-current", user_id=user.id, status="active"))
+    db_session.commit()
+    service = AuthService(db_session)
+    token_payload = {
+        "sub": str(user.id),
+        "jti": "jti-filtered-current",
+        "sid": "sid-filtered-current",
+        "exp": 4_102_444_800,
+    }
+    attach_service_fakes(service, token_payload=token_payload)
+
+    response = service.current_user("access")
+
+    assert response.roles == ["admin"]
 
 
 def test_current_user_rejects_blacklisted_user(db_session: DbSession) -> None:

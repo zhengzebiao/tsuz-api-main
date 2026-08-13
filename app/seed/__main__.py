@@ -32,6 +32,12 @@ DEFAULT_PERMISSIONS = {
     "user:recover": "Recover blacklisted users",
     "user:reset_password": "Reset user passwords",
     "user:force_logout": "Force users to log out",
+    "user:assign_roles": "Assign roles to users",
+    "role:read": "Read roles and role users",
+    "role:create": "Create roles",
+    "role:update": "Update roles",
+    "role:disable": "Disable roles",
+    "role:enable": "Enable roles",
 }
 
 

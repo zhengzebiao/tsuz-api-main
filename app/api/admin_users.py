@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session as DbSession
 from app.api.dependencies import require_permissions
 from app.core.database import get_db
 from app.core.logging import request_id_context
+from app.models.role import Role
 from app.models.user import User
+from app.schemas.admin_role import AdminRoleSummary
 from app.schemas.admin_user import (
     AdminForceLogoutRequest,
     AdminForceLogoutResponse,
@@ -16,9 +18,12 @@ from app.schemas.admin_user import (
     AdminUserCreate,
     AdminUserListResponse,
     AdminUserResponse,
+    AdminUserRoleAssignment,
+    AdminUserRolesResponse,
     AdminUserUpdate,
     UserStatusReason,
 )
+from app.services.admin_role_service import RoleDisabledError, RoleNotFoundError
 from app.services.admin_user_service import (
     AdminUserError,
     AdminUserService,
@@ -42,10 +47,12 @@ _ERROR_STATUS_CODES: dict[type[AdminUserError], int] = {
     UserBlacklistedError: status.HTTP_409_CONFLICT,
     SelfOperationNotAllowedError: status.HTTP_409_CONFLICT,
     LastActiveAdminError: status.HTTP_409_CONFLICT,
+    RoleNotFoundError: status.HTTP_404_NOT_FOUND,
+    RoleDisabledError: status.HTTP_409_CONFLICT,
 }
 
 
-def _raise_admin_error(exc: AdminUserError) -> None:
+def _raise_admin_error(exc: AdminUserError | RoleNotFoundError | RoleDisabledError) -> None:
     status_code = next(
         (code for error_type, code in _ERROR_STATUS_CODES.items() if isinstance(exc, error_type)),
         status.HTTP_400_BAD_REQUEST,
@@ -67,6 +74,35 @@ def _action_response(user: User, changed: bool, revoked_sessions: int) -> AdminU
         changed=changed,
         revoked_sessions=revoked_sessions,
     )
+
+
+def _user_roles_response(
+    user: User,
+    roles: list[Role],
+    changed: bool,
+    revoked_sessions: int,
+) -> AdminUserRolesResponse:
+    return AdminUserRolesResponse(
+        user_id=user.id,
+        roles=[AdminRoleSummary.model_validate(role) for role in roles],
+        version=user.version,
+        changed=changed,
+        revoked_sessions=revoked_sessions,
+    )
+
+
+def _execute_roles_write(db: DbSession, operation: Callable[[], AdminUserRolesResponse]) -> AdminUserRolesResponse:
+    try:
+        response = operation()
+        db.commit()
+        return response
+    except (AdminUserError, RoleNotFoundError, RoleDisabledError) as exc:
+        db.rollback()
+        _raise_admin_error(exc)
+    except Exception:
+        db.rollback()
+        raise
+    raise AssertionError("unreachable")
 
 
 @router.get("", response_model=AdminUserListResponse, summary="List users")
@@ -92,6 +128,42 @@ def list_users(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{user_id}/roles", response_model=AdminUserRolesResponse, summary="Get user roles")
+def get_user_roles(
+    user_id: int,
+    _actor: User = Depends(require_permissions("user:read")),
+    db: DbSession = Depends(get_db),
+) -> AdminUserRolesResponse:
+    try:
+        service = AdminUserService(db)
+        user = service.get_user(user_id)
+        return _user_roles_response(user, service.get_user_roles(user_id), False, 0)
+    except (AdminUserError, RoleNotFoundError, RoleDisabledError) as exc:
+        _raise_admin_error(exc)
+    raise AssertionError("unreachable")
+
+
+@router.put("/{user_id}/roles", response_model=AdminUserRolesResponse, summary="Replace user roles")
+def assign_user_roles(
+    user_id: int,
+    payload: AdminUserRoleAssignment,
+    _request: Request,
+    actor: User = Depends(require_permissions("user:assign_roles")),
+    db: DbSession = Depends(get_db),
+) -> AdminUserRolesResponse:
+    def operation() -> AdminUserRolesResponse:
+        user, roles, changed, revoked_sessions = AdminUserService(db).assign_roles(
+            user_id,
+            payload.role_ids,
+            payload.version,
+            actor_user_id=actor.id,
+            request_id=_request_id(),
+        )
+        return _user_roles_response(user, roles, changed, revoked_sessions)
+
+    return _execute_roles_write(db, operation)
 
 
 @router.get("/{user_id}", response_model=AdminUserResponse, summary="Get user details")
