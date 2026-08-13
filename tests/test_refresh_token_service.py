@@ -107,6 +107,7 @@ def test_rotated_refresh_token_after_grace_revokes_session(fake_redis: FakeRedis
 
     assert fake_redis.get(session_key("sid_123")) == "revoked"
     assert "refresh reuse detected" in caplog.text
+    assert "sid_123" not in caplog.text
     assert refresh_token not in caplog.text
 
 

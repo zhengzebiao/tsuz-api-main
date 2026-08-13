@@ -55,7 +55,7 @@ class RefreshTokenService:
             self.ensure_session_active(sid)
         if self._is_expired(data.get("expires_at", "")):
             get_redis().hset(key, mapping={"status": "revoked"})
-            logger.warning("refresh rejected reason=expired sid=%s", sid)
+            logger.warning("refresh rejected reason=expired")
             raise ValueError("invalid refresh token")
 
         status = data.get("status")
@@ -72,19 +72,19 @@ class RefreshTokenService:
                     "replaced_by": new_refresh_hash,
                 },
             )
-            logger.info("refresh rotated sid=%s replaced_by=%s", sid, new_refresh_hash[:12])
+            logger.info("refresh rotated session_replaced=true")
             return {"user_id": user_id, "sid": sid, "refresh_token": new_refresh_token}
 
         if status == "rotated":
             if self._within_reuse_grace(data.get("rotated_at", "")):
-                logger.warning("refresh replay within grace sid=%s", sid)
+                logger.warning("refresh replay within grace")
                 raise ValueError("refresh token already rotated")
             if sid:
                 self.revoke_session(sid, reason="refresh_token_reuse")
-            logger.warning("refresh reuse detected sid=%s", sid)
+            logger.warning("refresh reuse detected")
             raise RefreshTokenReuseError(sid)
 
-        logger.warning("refresh rejected reason=status_%s sid=%s", status, sid)
+        logger.warning("refresh rejected reason=status_%s", status)
         raise ValueError("invalid refresh token")
 
     def revoke_session(self, sid: str, reason: str = "user_logout") -> None:

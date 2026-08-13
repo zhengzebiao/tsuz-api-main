@@ -46,7 +46,7 @@ class AuthService:
         )
         refresh_token = self.refresh_tokens.create_refresh_token(user_id=str(user.id), sid=sid)
         self.db.commit()
-        logger.info("login succeeded user_id=%s sid=%s", user.id, sid)
+        logger.info("login succeeded user_id=%s", user.id)
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -77,7 +77,7 @@ class AuthService:
         access_token = self.tokens.create_access_token(
             user_id=str(user.id), sid=rotation["sid"], roles=roles, scope=scope
         )
-        logger.info("refresh succeeded user_id=%s sid=%s", user.id, rotation["sid"])
+        logger.info("refresh succeeded user_id=%s", user.id)
         return TokenResponse(
             access_token=access_token,
             refresh_token=rotation["refresh_token"],
@@ -94,7 +94,7 @@ class AuthService:
         self.blacklist.add_jti(jti, exp)
         self.sessions.revoke_session(sid, reason="user_logout")
         self.db.commit()
-        logger.info("logout succeeded sid=%s jti=%s", sid, jti)
+        logger.info("logout succeeded user_session_revoked=true")
         return LogoutResponse(message="logged out")
 
     def current_user(self, access_token: str) -> UserResponse:

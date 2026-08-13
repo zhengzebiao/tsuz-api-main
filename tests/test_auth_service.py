@@ -386,4 +386,6 @@ def test_logout_logs_without_raw_access_token(db_session: DbSession, caplog) -> 
         service.logout(raw_access_token)
 
     assert "logout succeeded" in caplog.text
+    assert "sid-logout" not in caplog.text
+    assert "jti-logout" not in caplog.text
     assert raw_access_token not in caplog.text
