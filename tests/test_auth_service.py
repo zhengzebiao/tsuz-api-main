@@ -121,6 +121,30 @@ def attach_disabled_role_with_permission(db: DbSession, user: User) -> None:
     db.commit()
 
 
+def attach_inactive_permissions_to_enabled_role(db: DbSession, user: User) -> None:
+    role = Role(name="permission-state-reviewer")
+    disabled = Permission(
+        name="app:disable",
+        description="Disabled permission",
+        is_enabled=False,
+    )
+    missing = Permission(
+        name="app:enable",
+        description="Missing permission",
+        is_declared=False,
+    )
+    db.add_all((role, disabled, missing))
+    db.flush()
+    db.execute(user_roles.insert().values(user_id=user.id, role_id=role.id))
+    db.execute(
+        role_permissions.insert().values(role_id=role.id, permission_id=disabled.id)
+    )
+    db.execute(
+        role_permissions.insert().values(role_id=role.id, permission_id=missing.id)
+    )
+    db.commit()
+
+
 def attach_service_fakes(service: AuthService, *, token_payload: dict | None = None, rotation: dict | None = None):
     tokens = RecordingTokenService(payload=token_payload)
     refresh_tokens = RecordingRefreshTokenService(rotation=rotation)
@@ -155,12 +179,13 @@ def test_login_uses_db_user_password_and_rbac_claims(db_session: DbSession) -> N
 def test_login_excludes_disabled_roles_and_permissions_from_claims(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
     attach_disabled_role_with_permission(db_session, user)
+    attach_inactive_permissions_to_enabled_role(db_session, user)
     service = AuthService(db_session)
     tokens, _refresh_tokens, _blacklist = attach_service_fakes(service)
 
     service.login(LoginRequest(username="admin@example.com", password="password123"))
 
-    assert tokens.created[0]["roles"] == ["admin"]
+    assert tokens.created[0]["roles"] == ["admin", "permission-state-reviewer"]
     assert tokens.created[0]["scope"] == "user:read user:write"
 
 
@@ -227,6 +252,7 @@ def test_refresh_uses_db_user_session_and_rbac_claims(db_session: DbSession) -> 
 def test_refresh_excludes_disabled_roles_and_permissions_from_claims(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
     attach_disabled_role_with_permission(db_session, user)
+    attach_inactive_permissions_to_enabled_role(db_session, user)
     db_session.add(AuthSession(sid="sid-filtered-refresh", user_id=user.id, status="active"))
     db_session.commit()
     service = AuthService(db_session)
@@ -241,7 +267,7 @@ def test_refresh_excludes_disabled_roles_and_permissions_from_claims(db_session:
 
     service.refresh("refresh")
 
-    assert tokens.created[0]["roles"] == ["admin"]
+    assert tokens.created[0]["roles"] == ["admin", "permission-state-reviewer"]
     assert tokens.created[0]["scope"] == "user:read user:write"
 
 

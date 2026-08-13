@@ -144,6 +144,8 @@ class AuthService:
             .where(
                 user_roles.c.user_id == user_id,
                 Role.is_enabled.is_(True),
+                Permission.is_declared.is_(True),
+                Permission.is_enabled.is_(True),
             )
             .order_by(Permission.name)
         ).all()

@@ -203,22 +203,22 @@ def test_postgresql_advisory_lock_serializes_concurrent_sync() -> None:
                 first_created = first_future.result(timeout=15)
                 second_created = second_future.result(timeout=15)
 
-            assert first_created == 21
+            assert first_created == 25
             assert second_created == 0
             assert lock_waits[2] >= 0.25
 
             with SessionLocal() as db:
-                assert db.scalar(select(func.count()).select_from(Permission)) == 21
+                assert db.scalar(select(func.count()).select_from(Permission)) == 25
                 assert db.scalar(
                     select(func.count()).select_from(PermissionEndpoint)
-                ) == 26
+                ) == 31
                 admin_role = db.scalar(select(Role).where(Role.name == "admin"))
                 assert admin_role is not None
                 assert db.scalar(
                     select(func.count())
                     .select_from(role_permissions)
                     .where(role_permissions.c.role_id == admin_role.id)
-                ) == 21
+                ) == 25
                 final_plan = PermissionSyncService(db).build_plan(catalog)
                 assert final_plan.has_changes is False
         finally:

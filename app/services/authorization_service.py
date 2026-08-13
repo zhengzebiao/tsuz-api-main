@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
 import jwt
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from app.models.permission import Permission
 from app.models.user import User
 from app.services.blacklist_service import BlacklistService
 from app.services.session_service import SessionService
@@ -55,7 +57,19 @@ class AuthorizationService:
         if not isinstance(scope, str):
             raise AuthenticationError("invalid access token")
         granted_permissions = set(scope.split())
-        if not set(required_permissions).issubset(granted_permissions):
+        required = set(required_permissions)
+        if not required.issubset(granted_permissions):
+            raise PermissionDeniedError("insufficient permissions")
+        active_permission_count = self.db.scalar(
+            select(func.count())
+            .select_from(Permission)
+            .where(
+                Permission.name.in_(required),
+                Permission.is_declared.is_(True),
+                Permission.is_enabled.is_(True),
+            )
+        ) or 0
+        if active_permission_count != len(required):
             raise PermissionDeniedError("insufficient permissions")
         return principal.user
 

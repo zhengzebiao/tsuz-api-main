@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session as DbSession, sessionmaker
 
 from app.core.database import Base
+from app.models.permission import Permission
 from app.models.session import Session as AuthSession
 from app.models.user import User
 from app.services.authorization_service import AuthenticationError, AuthorizationService, PermissionDeniedError
@@ -91,6 +92,13 @@ def create_user(db: DbSession, *, active: bool = True, blacklisted: bool = False
 
 def test_authorization_returns_user_when_access_token_has_permissions(db_session: DbSession) -> None:
     user = create_user(db_session)
+    db_session.add_all(
+        (
+            Permission(name="user:read", display_name="user:read"),
+            Permission(name="user:create", display_name="user:create"),
+        )
+    )
+    db_session.commit()
     service = build_service(db_session, user)
 
     authenticated_user = service.require_permissions("access-token", ("user:read", "user:create"))
@@ -143,6 +151,62 @@ def test_authorization_rejects_missing_permission(db_session: DbSession) -> None
 
     with pytest.raises(PermissionDeniedError, match="insufficient permissions"):
         service.require_permissions("access-token", ("user:create",))
+
+
+@pytest.mark.parametrize(
+    ("declared", "enabled"),
+    [(False, True), (True, False), (False, False)],
+)
+def test_authorization_rejects_inactive_database_permission(
+    db_session: DbSession,
+    declared: bool,
+    enabled: bool,
+) -> None:
+    user = create_user(db_session)
+    db_session.add(
+        Permission(
+            name="user:read",
+            display_name="user:read",
+            is_declared=declared,
+            is_enabled=enabled,
+        )
+    )
+    db_session.commit()
+    service = build_service(db_session, user, scope="user:read")
+
+    with pytest.raises(PermissionDeniedError, match="insufficient permissions"):
+        service.require_permissions("access-token", ("user:read",))
+
+
+def test_authorization_rejects_scope_permission_missing_from_database(
+    db_session: DbSession,
+) -> None:
+    user = create_user(db_session)
+    service = build_service(db_session, user, scope="user:read")
+
+    with pytest.raises(PermissionDeniedError, match="insufficient permissions"):
+        service.require_permissions("access-token", ("user:read",))
+
+
+def test_authorization_rejects_mixed_active_and_inactive_required_permissions(
+    db_session: DbSession,
+) -> None:
+    user = create_user(db_session)
+    db_session.add_all(
+        (
+            Permission(name="user:read", display_name="user:read"),
+            Permission(
+                name="user:create",
+                display_name="user:create",
+                is_enabled=False,
+            ),
+        )
+    )
+    db_session.commit()
+    service = build_service(db_session, user)
+
+    with pytest.raises(PermissionDeniedError, match="insufficient permissions"):
+        service.require_permissions("access-token", ("user:read", "user:create"))
 
 
 def test_authorization_rejects_malformed_scope(db_session: DbSession) -> None:
