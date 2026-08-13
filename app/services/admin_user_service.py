@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
@@ -13,6 +13,10 @@ from app.models.audit_event import AuditEvent
 from app.models.role import Role, user_roles
 from app.models.user import User
 from app.schemas.admin_user import AdminUserCreate, AdminUserUpdate
+from app.services.admin_role_service import (
+    RoleDisabledError,
+    RoleNotFoundError,
+)
 from app.services.session_service import SessionService
 
 
@@ -95,6 +99,87 @@ class AdminUserService:
         if user is None:
             raise UserNotFoundError(UserNotFoundError.code)
         return user
+
+    def get_user_roles(self, user_id: int) -> list[Role]:
+        self.get_user(user_id)
+        roles = self.db.scalars(
+            select(Role)
+            .join(user_roles, user_roles.c.role_id == Role.id)
+            .where(user_roles.c.user_id == user_id)
+            .order_by(Role.name, Role.id)
+        ).all()
+        return list(roles)
+
+    def assign_roles(
+        self,
+        user_id: int,
+        role_ids: list[int],
+        version: int,
+        *,
+        actor_user_id: int,
+        request_id: str | None = None,
+    ) -> tuple[User, list[Role], bool, int]:
+        user = self._lock_user(user_id)
+        if user.version != version:
+            self._abort(UserVersionConflictError(UserVersionConflictError.code))
+
+        current_roles = self._get_roles_for_user(user_id)
+        current_by_id = {role.id: role for role in current_roles}
+        target_ids = set(role_ids)
+        target_roles = self._get_roles_by_ids(target_ids)
+        target_by_id = {role.id: role for role in target_roles}
+        if set(target_by_id) != target_ids:
+            raise RoleNotFoundError(RoleNotFoundError.code)
+
+        added_ids = target_ids - set(current_by_id)
+        removed_ids = set(current_by_id) - target_ids
+        if any(not target_by_id[role_id].is_enabled for role_id in added_ids):
+            raise RoleDisabledError(RoleDisabledError.code)
+        if not added_ids and not removed_ids:
+            return user, current_roles, False, 0
+
+        self._ensure_admin_role_removal_allowed(
+            user=user,
+            current_by_id=current_by_id,
+            removed_ids=removed_ids,
+            actor_user_id=actor_user_id,
+        )
+        before_roles = self._role_audit_values(current_roles)
+
+        if removed_ids:
+            self.db.execute(
+                delete(user_roles).where(
+                    user_roles.c.user_id == user_id,
+                    user_roles.c.role_id.in_(removed_ids),
+                )
+            )
+        if added_ids:
+            self.db.execute(
+                user_roles.insert(),
+                [{"user_id": user_id, "role_id": role_id} for role_id in sorted(added_ids)],
+            )
+
+        user.version += 1
+        user.updated_at = self._now()
+        self.db.flush()
+        revoked_sessions = self.sessions.revoke_user_sessions(user_id, "user_roles_changed")
+        assigned_roles = sorted(target_roles, key=lambda role: (role.name, role.id))
+        self._add_audit(
+            actor_user_id=actor_user_id,
+            action="user.roles_assigned",
+            target_id=user_id,
+            result="success",
+            request_id=request_id,
+            changes={
+                "roles": {
+                    "from": before_roles,
+                    "to": self._role_audit_values(assigned_roles),
+                },
+                "revoked_sessions": revoked_sessions,
+            },
+        )
+        self.db.flush()
+        return user, assigned_roles, True, revoked_sessions
 
     def create_user(self, payload: AdminUserCreate, *, actor_user_id: int, request_id: str | None = None) -> User:
         email = self._normalize_email(payload.email)
@@ -321,6 +406,69 @@ class AdminUserService:
         if user is None:
             self._abort(UserNotFoundError(UserNotFoundError.code))
         return user
+
+    def _get_roles_for_user(self, user_id: int) -> list[Role]:
+        roles = self.db.scalars(
+            select(Role)
+            .join(user_roles, user_roles.c.role_id == Role.id)
+            .where(user_roles.c.user_id == user_id)
+            .order_by(Role.name, Role.id)
+        ).all()
+        return list(roles)
+
+    def _get_roles_by_ids(self, role_ids: set[int]) -> list[Role]:
+        if not role_ids:
+            return []
+        return list(
+            self.db.scalars(
+                select(Role)
+                .where(Role.id.in_(role_ids))
+                .order_by(Role.id)
+                .with_for_update()
+            ).all()
+        )
+
+    def _ensure_admin_role_removal_allowed(
+        self,
+        *,
+        user: User,
+        current_by_id: dict[int, Role],
+        removed_ids: set[int],
+        actor_user_id: int,
+    ) -> None:
+        removed_admin = next(
+            (
+                role
+                for role_id, role in current_by_id.items()
+                if role_id in removed_ids and role.name == self.ADMIN_ROLE_NAME
+            ),
+            None,
+        )
+        if removed_admin is None:
+            return
+        self.db.scalar(select(Role).where(Role.id == removed_admin.id).with_for_update())
+        if user.id == actor_user_id:
+            self._abort(SelfOperationNotAllowedError(SelfOperationNotAllowedError.code))
+        if not user.is_active or user.is_blacklisted:
+            return
+        active_admin_count = self.db.scalar(
+            select(func.count(func.distinct(User.id)))
+            .select_from(User)
+            .join(user_roles, user_roles.c.user_id == User.id)
+            .where(
+                user_roles.c.role_id == removed_admin.id,
+                User.is_active.is_(True),
+                User.is_blacklisted.is_(False),
+            )
+        )
+        if (active_admin_count or 0) <= 1:
+            self._abort(LastActiveAdminError(LastActiveAdminError.code))
+
+    def _role_audit_values(self, roles: list[Role]) -> list[dict[str, int | str]]:
+        return [
+            {"id": role.id, "name": role.name}
+            for role in sorted(roles, key=lambda role: (role.name, role.id))
+        ]
 
     def _ensure_not_self(self, user_id: int, actor_user_id: int) -> None:
         if user_id == actor_user_id:
