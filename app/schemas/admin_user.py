@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictInt, field_validator
+
+from app.schemas.admin_role import AdminRoleSummary
 
 
 class _StrictModel(BaseModel):
@@ -69,6 +71,28 @@ class AdminForceLogoutRequest(_StrictModel):
             return None
         value = value.strip()
         return value or None
+
+
+class AdminUserRoleAssignment(_StrictModel):
+    role_ids: list[StrictInt]
+    version: StrictInt = Field(gt=0)
+
+    @field_validator("role_ids")
+    @classmethod
+    def validate_role_ids(cls, value: list[int]) -> list[int]:
+        if any(role_id <= 0 for role_id in value):
+            raise ValueError("role_ids must contain only positive integers")
+        if len(value) != len(set(value)):
+            raise ValueError("role_ids must not contain duplicates")
+        return value
+
+
+class AdminUserRolesResponse(_StrictModel):
+    user_id: int
+    roles: list[AdminRoleSummary]
+    version: int
+    changed: bool
+    revoked_sessions: int = Field(default=0, ge=0)
 
 
 class AdminUserResponse(BaseModel):
