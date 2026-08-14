@@ -23,6 +23,11 @@ from app.services.admin_role_service import (
     RoleNotFoundError,
     RoleVersionConflictError,
 )
+from app.services.admin_permission_service import (
+    PermissionDisabledError,
+    PermissionNotDeclaredError,
+    PermissionNotFoundError,
+)
 
 
 class FakeRedis:
@@ -58,6 +63,24 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
     redis = FakeRedis()
     monkeypatch.setattr(session_module, "get_redis", lambda: redis)
     return redis
+
+
+def add_permission(
+    db: DbSession,
+    name: str,
+    *,
+    declared: bool = True,
+    enabled: bool = True,
+) -> Permission:
+    permission = Permission(
+        name=name,
+        display_name=name,
+        is_declared=declared,
+        is_enabled=enabled,
+    )
+    db.add(permission)
+    db.flush()
+    return permission
 
 
 def add_user(
@@ -416,6 +439,257 @@ def test_disable_and_enable_are_idempotent_preserve_associations_and_audit(
     assert audits[1].changes_json["revoked_sessions"] == 0
 
 
+def test_role_permission_assignment_replaces_full_set_idempotently_and_audits(
+    db_session: DbSession,
+    fake_redis: FakeRedis,
+) -> None:
+    actor = add_user(db_session, "actor@example.com")
+    first_user = add_user(db_session, "first@example.com")
+    second_user = add_user(db_session, "second@example.com")
+    role = add_role(db_session, "auditor")
+    app_read = add_permission(db_session, "app:read")
+    role_read = add_permission(db_session, "role:read")
+    user_read = add_permission(db_session, "user:read")
+    attach_role(db_session, first_user, role)
+    attach_role(db_session, second_user, role)
+    db_session.execute(
+        role_permissions.insert().values(
+            role_id=role.id,
+            permission_id=app_read.id,
+        )
+    )
+    add_active_session(db_session, first_user, "sid-permission-first")
+    add_active_session(db_session, second_user, "sid-permission-second")
+    db_session.commit()
+
+    service = AdminRoleService(db_session)
+    assert [
+        permission.name for permission in service.get_role_permissions(role.id)
+    ] == ["app:read"]
+
+    assigned_role, permissions, changed, revoked = service.assign_permissions(
+        role.id,
+        [user_read.id, role_read.id],
+        role.version,
+        actor_user_id=actor.id,
+        request_id="req-role-permissions",
+    )
+
+    assert changed is True
+    assert revoked == 2
+    assert assigned_role.version == 2
+    assert [permission.name for permission in permissions] == [
+        "role:read",
+        "user:read",
+    ]
+    assert set(
+        db_session.scalars(
+            select(role_permissions.c.permission_id).where(
+                role_permissions.c.role_id == role.id
+            )
+        ).all()
+    ) == {role_read.id, user_read.id}
+    assert set(fake_redis.values.values()) == {"revoked"}
+    audit = role_audits(db_session)[0]
+    assert audit.action == "role.permissions_assigned"
+    assert audit.request_id == "req-role-permissions"
+    assert audit.changes_json == {
+        "permissions": {
+            "from": [{"id": app_read.id, "name": "app:read"}],
+            "to": [
+                {"id": role_read.id, "name": "role:read"},
+                {"id": user_read.id, "name": "user:read"},
+            ],
+        },
+        "revoked_sessions": 2,
+    }
+    audit_text = str(audit.changes_json).lower()
+    assert "password" not in audit_text
+    assert "token" not in audit_text
+    assert "sid-permission" not in audit_text
+
+    unchanged_role, unchanged_permissions, changed, revoked = (
+        service.assign_permissions(
+            role.id,
+            [role_read.id, user_read.id],
+            assigned_role.version,
+            actor_user_id=actor.id,
+        )
+    )
+    assert changed is False
+    assert revoked == 0
+    assert unchanged_role.version == 2
+    assert [permission.name for permission in unchanged_permissions] == [
+        "role:read",
+        "user:read",
+    ]
+    assert len(role_audits(db_session)) == 1
+
+    cleared, permissions, changed, revoked = service.assign_permissions(
+        role.id,
+        [],
+        unchanged_role.version,
+        actor_user_id=actor.id,
+    )
+    assert changed is True
+    assert revoked == 0
+    assert cleared.version == 3
+    assert permissions == []
+    assert db_session.scalar(
+        select(func.count())
+        .select_from(role_permissions)
+        .where(role_permissions.c.role_id == role.id)
+    ) == 0
+
+
+def test_role_permission_assignment_validates_targets_status_version_and_admin(
+    db_session: DbSession,
+) -> None:
+    actor = add_user(db_session, "actor@example.com")
+    role = add_role(db_session, "auditor")
+    admin = add_role(db_session, "admin")
+    active = add_permission(db_session, "app:read")
+    disabled = add_permission(db_session, "app:update", enabled=False)
+    missing = add_permission(db_session, "legacy:read", declared=False)
+    db_session.execute(
+        role_permissions.insert().values(
+            role_id=admin.id,
+            permission_id=active.id,
+        )
+    )
+    db_session.commit()
+    service = AdminRoleService(db_session)
+
+    with pytest.raises(PermissionNotFoundError, match="PERMISSION_NOT_FOUND"):
+        service.assign_permissions(
+            role.id,
+            [999],
+            role.version,
+            actor_user_id=actor.id,
+        )
+    with pytest.raises(PermissionDisabledError, match="PERMISSION_DISABLED"):
+        service.assign_permissions(
+            role.id,
+            [disabled.id],
+            role.version,
+            actor_user_id=actor.id,
+        )
+    with pytest.raises(PermissionNotDeclaredError, match="PERMISSION_NOT_DECLARED"):
+        service.assign_permissions(
+            role.id,
+            [missing.id],
+            role.version,
+            actor_user_id=actor.id,
+        )
+    with pytest.raises(RoleVersionConflictError, match="ROLE_VERSION_CONFLICT"):
+        service.assign_permissions(
+            role.id,
+            [active.id],
+            999,
+            actor_user_id=actor.id,
+        )
+    with pytest.raises(ProtectedRoleOperationError, match="PROTECTED_ROLE_OPERATION"):
+        service.assign_permissions(
+            admin.id,
+            [],
+            admin.version,
+            actor_user_id=actor.id,
+        )
+
+    db_session.expire_all()
+    assert service.get_role_permissions(role.id) == []
+    assert [permission.id for permission in service.get_role_permissions(admin.id)] == [
+        active.id
+    ]
+    assert role_audits(db_session) == []
+
+
+def test_existing_invalid_role_permissions_can_be_retained_or_removed(
+    db_session: DbSession,
+) -> None:
+    actor = add_user(db_session, "actor@example.com")
+    role = add_role(db_session, "auditor")
+    disabled = add_permission(db_session, "app:update", enabled=False)
+    missing = add_permission(db_session, "legacy:read", declared=False)
+    db_session.execute(
+        role_permissions.insert(),
+        [
+            {"role_id": role.id, "permission_id": disabled.id},
+            {"role_id": role.id, "permission_id": missing.id},
+        ],
+    )
+    db_session.commit()
+    service = AdminRoleService(db_session)
+
+    unchanged, permissions, changed, revoked = service.assign_permissions(
+        role.id,
+        [disabled.id, missing.id],
+        role.version,
+        actor_user_id=actor.id,
+    )
+    assert changed is False
+    assert revoked == 0
+    assert unchanged.version == 1
+    assert [permission.name for permission in permissions] == [
+        "app:update",
+        "legacy:read",
+    ]
+
+    updated, permissions, changed, revoked = service.assign_permissions(
+        role.id,
+        [missing.id],
+        unchanged.version,
+        actor_user_id=actor.id,
+    )
+    assert changed is True
+    assert revoked == 0
+    assert updated.version == 2
+    assert [permission.name for permission in permissions] == ["legacy:read"]
+
+
+def test_role_permission_assignment_shares_caller_transaction(
+    db_session: DbSession,
+) -> None:
+    actor = add_user(db_session, "actor@example.com")
+    target = add_user(db_session, "target@example.com")
+    role = add_role(db_session, "auditor")
+    permission = add_permission(db_session, "app:read")
+    attach_role(db_session, target, role)
+    add_active_session(db_session, target, "sid-rollback-permissions")
+    role_id = role.id
+    permission_id = permission.id
+    db_session.commit()
+
+    changed_role, permissions, changed, revoked = (
+        AdminRoleService(db_session).assign_permissions(
+            role_id,
+            [permission_id],
+            role.version,
+            actor_user_id=actor.id,
+        )
+    )
+    assert changed is True
+    assert revoked == 1
+    assert [item.id for item in permissions] == [permission_id]
+    assert changed_role.version == 2
+    assert len(role_audits(db_session)) == 1
+
+    db_session.rollback()
+
+    restored = db_session.get(Role, role_id)
+    session = db_session.scalar(
+        select(AuthSession).where(
+            AuthSession.sid == "sid-rollback-permissions"
+        )
+    )
+    assert restored is not None
+    assert restored.version == 1
+    assert session is not None
+    assert session.status == "active"
+    assert AdminRoleService(db_session).get_role_permissions(role_id) == []
+    assert role_audits(db_session) == []
+
+
 def test_list_role_users_supports_disabled_roles_filters_and_empty_results(db_session: DbSession) -> None:
     actor = add_user(db_session, "actor@example.com")
     alice = add_user(db_session, "alice@example.com", display_name="Alice Reviewer")
@@ -474,6 +748,46 @@ def test_status_operations_issue_for_update(db_session: DbSession, monkeypatch: 
     ]
     assert len(lock_statements) == 2
     assert all("FOR UPDATE" in statement for statement in lock_statements)
+
+
+def test_role_permission_assignment_locks_role_and_target_permissions(
+    db_session: DbSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = add_user(db_session, "actor-permissions@example.com")
+    role = add_role(db_session, "permission-manager")
+    permission = add_permission(db_session, "app:read")
+    db_session.commit()
+    original_scalar = db_session.scalar
+    original_scalars = db_session.scalars
+    statements: list[Any] = []
+
+    def scalar_spy(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        statements.append(statement)
+        return original_scalar(statement, *args, **kwargs)
+
+    def scalars_spy(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        statements.append(statement)
+        return original_scalars(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "scalar", scalar_spy)
+    monkeypatch.setattr(db_session, "scalars", scalars_spy)
+
+    AdminRoleService(db_session).assign_permissions(
+        role.id,
+        [permission.id],
+        role.version,
+        actor_user_id=actor.id,
+    )
+
+    lock_statements = [
+        str(statement.compile(dialect=postgresql.dialect()))
+        for statement in statements
+        if getattr(statement, "_for_update_arg", None) is not None
+    ]
+    assert len(lock_statements) == 2
+    assert any("FROM roles" in statement for statement in lock_statements)
+    assert any("FROM permissions" in statement for statement in lock_statements)
 
 
 def test_role_change_and_audit_share_caller_transaction(db_session: DbSession) -> None:

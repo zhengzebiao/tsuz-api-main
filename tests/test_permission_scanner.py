@@ -173,6 +173,7 @@ def test_main_application_permission_catalog_and_admin_coverage() -> None:
         "permission:enable",
         "permission:read",
         "permission:update",
+        "role:assign_permissions",
         "role:create",
         "role:disable",
         "role:enable",
@@ -189,7 +190,7 @@ def test_main_application_permission_catalog_and_admin_coverage() -> None:
         "user:reset_password",
         "user:update",
     )
-    assert len(result.bindings) == 31
-    assert len([route for route in result.routes if route.path.startswith("/admin/") or route.path == "/admin"]) == 31
+    assert len(result.bindings) == 33
+    assert len([route for route in result.routes if route.path.startswith("/admin/") or route.path == "/admin"]) == 33
     assert not any(binding.path in {"/health", "/auth/login", "/auth/refresh"} for binding in result.bindings)
     assert all(route.required_permissions for route in result.routes if route.path.startswith("/admin/"))

@@ -53,11 +53,11 @@ def test_role_phase5_postgres_concurrency(role_phase5_config: RolePhase5Config) 
 def test_role_phase5_real_jwt_redis_and_http(role_phase5_config: RolePhase5Config) -> None:
     report = run_http_validation(role_phase5_config)
 
-    assert report["permissions_verified"] == 6
-    assert report["permission_denials_verified"] >= 8
-    assert report["lifecycle_audits_verified"] == 5
-    assert report["request_ids_verified"] == 5
-    assert report["redis_revocations_verified"] == 2
+    assert report["permissions_verified"] == 7
+    assert report["permission_denials_verified"] >= 9
+    assert report["lifecycle_audits_verified"] == 6
+    assert report["request_ids_verified"] == 6
+    assert report["redis_revocations_verified"] == 3
     assert report["old_sessions_rejected"] is True
     assert report["disabled_role_claim_filter"] is True
     assert report["reenabled_role_claim_restore"] is True

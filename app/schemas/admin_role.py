@@ -74,6 +74,39 @@ class AdminRoleSummary(BaseModel):
     is_enabled: bool
 
 
+class AdminRolePermissionAssignment(_StrictModel):
+    permission_ids: list[StrictInt]
+    version: StrictInt = Field(gt=0)
+
+    @field_validator("permission_ids")
+    @classmethod
+    def validate_permission_ids(cls, value: list[int]) -> list[int]:
+        if any(permission_id <= 0 for permission_id in value):
+            raise ValueError("permission_ids must contain only positive integers")
+        if len(value) != len(set(value)):
+            raise ValueError("permission_ids must not contain duplicates")
+        return value
+
+
+class AdminRolePermissionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: int
+    name: str
+    display_name: str
+    description: str
+    is_declared: bool
+    is_enabled: bool
+
+
+class AdminRolePermissionsResponse(_StrictModel):
+    role_id: int
+    permissions: list[AdminRolePermissionSummary]
+    version: int
+    changed: bool
+    revoked_sessions: int = Field(default=0, ge=0)
+
+
 class AdminRoleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 

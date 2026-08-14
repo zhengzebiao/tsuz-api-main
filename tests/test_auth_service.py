@@ -189,6 +189,43 @@ def test_login_excludes_disabled_roles_and_permissions_from_claims(db_session: D
     assert tokens.created[0]["scope"] == "user:read user:write"
 
 
+def test_login_reflects_role_permission_replacement(
+    db_session: DbSession,
+) -> None:
+    create_user_with_rbac(db_session)
+    role = db_session.scalar(select(Role).where(Role.name == "admin"))
+    app_read = Permission(name="app:read", display_name="View apps")
+    db_session.add(app_read)
+    db_session.flush()
+    assert role is not None
+    existing_permission_ids = set(
+        db_session.scalars(
+            select(role_permissions.c.permission_id).where(
+                role_permissions.c.role_id == role.id
+            )
+        ).all()
+    )
+    db_session.execute(
+        role_permissions.delete().where(
+            role_permissions.c.role_id == role.id,
+            role_permissions.c.permission_id.in_(existing_permission_ids),
+        )
+    )
+    db_session.execute(
+        role_permissions.insert().values(
+            role_id=role.id,
+            permission_id=app_read.id,
+        )
+    )
+    db_session.commit()
+
+    service = AuthService(db_session)
+    tokens, _refresh_tokens, _blacklist = attach_service_fakes(service)
+    service.login(LoginRequest(username="admin@example.com", password="password123"))
+
+    assert tokens.created[0]["scope"] == "app:read"
+
+
 def test_login_rejects_wrong_password(db_session: DbSession) -> None:
     create_user_with_rbac(db_session)
     service = AuthService(db_session)

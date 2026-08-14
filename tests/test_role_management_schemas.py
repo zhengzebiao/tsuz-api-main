@@ -3,12 +3,16 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
+from app.models.permission import Permission
 from app.models.role import Role
 from app.schemas.admin_role import (
     AdminRoleActionResponse,
     AdminRoleCreate,
     AdminRoleDisableRequest,
     AdminRoleListResponse,
+    AdminRolePermissionAssignment,
+    AdminRolePermissionSummary,
+    AdminRolePermissionsResponse,
     AdminRoleResponse,
     AdminRoleSummary,
     AdminRoleUpdate,
@@ -123,6 +127,78 @@ def test_role_responses_expose_only_declared_safe_fields() -> None:
         AdminRoleSummary(**summary.model_dump(), disabled_reason="forbidden")
     with pytest.raises(ValidationError):
         AdminRoleActionResponse(**response.model_dump(), changed=True, revoked_sessions=-1)
+
+
+def test_role_permission_assignment_allows_empty_set_and_rejects_invalid_ids() -> None:
+    empty = AdminRolePermissionAssignment(permission_ids=[], version=4)
+    populated = AdminRolePermissionAssignment(permission_ids=[3, 8, 13], version=4)
+
+    assert empty.permission_ids == []
+    assert populated.permission_ids == [3, 8, 13]
+
+    invalid_payloads = (
+        {"permission_ids": [1, 1], "version": 1},
+        {"permission_ids": [0], "version": 1},
+        {"permission_ids": [-1], "version": 1},
+        {"permission_ids": [True], "version": 1},
+        {"permission_ids": [1], "version": 0},
+        {"permission_ids": [1]},
+        {"permission_ids": [1], "version": 1, "permissions": []},
+    )
+
+    for payload in invalid_payloads:
+        with pytest.raises(ValidationError):
+            AdminRolePermissionAssignment(**payload)
+
+
+def test_role_permissions_response_contains_only_safe_permission_summaries() -> None:
+    permission = Permission(
+        id=9,
+        name="app:read",
+        display_name="View apps",
+        description="Applications",
+        is_declared=False,
+        is_enabled=False,
+    )
+    summary = AdminRolePermissionSummary.model_validate(permission)
+    response = AdminRolePermissionsResponse(
+        role_id=7,
+        permissions=[summary],
+        version=5,
+        changed=True,
+        revoked_sessions=2,
+    )
+
+    assert response.permissions[0].id == permission.id
+    assert set(response.model_dump()) == {
+        "role_id",
+        "permissions",
+        "version",
+        "changed",
+        "revoked_sessions",
+    }
+    assert set(response.permissions[0].model_dump()) == {
+        "id",
+        "name",
+        "display_name",
+        "description",
+        "is_declared",
+        "is_enabled",
+    }
+
+    with pytest.raises(ValidationError):
+        AdminRolePermissionSummary(
+            **summary.model_dump(),
+            endpoints=[],
+        )
+    with pytest.raises(ValidationError):
+        AdminRolePermissionsResponse(
+            role_id=7,
+            permissions=[summary],
+            version=5,
+            changed=True,
+            revoked_sessions=-1,
+        )
 
 
 def test_user_role_assignment_allows_empty_set_and_rejects_invalid_ids() -> None:

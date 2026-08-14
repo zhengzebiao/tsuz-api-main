@@ -38,6 +38,7 @@ LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 HEAD_REVISION = "0005_permission_management"
 ROLE_PERMISSIONS = (
     "role:read",
+    "role:assign_permissions",
     "role:create",
     "role:update",
     "role:disable",
@@ -1021,6 +1022,7 @@ def _run_http_role_flow(
         "/admin/roles/{role_id}/disable": {"post"},
         "/admin/roles/{role_id}/enable": {"post"},
         "/admin/roles/{role_id}/users": {"get"},
+        "/admin/roles/{role_id}/permissions": {"get", "put"},
         "/admin/users/{user_id}/roles": {"get", "put"},
     }.items():
         _assert(path in paths and methods <= set(paths[path]), f"OpenAPI is missing {path} methods")
@@ -1047,6 +1049,11 @@ def _run_http_role_flow(
 
     permission_actions: dict[str, Callable[[str], httpx.Response]] = {
         "role:read": lambda token: client.get("/admin/roles", headers=_authorization(token)),
+        "role:assign_permissions": lambda token: client.put(
+            f"/admin/roles/{role_id}/permissions",
+            headers=_authorization(token),
+            json={"permission_ids": [], "version": created["version"]},
+        ),
         "role:create": lambda token: client.post("/admin/roles", headers=_authorization(token), json=create_payload),
         "role:update": lambda token: client.patch(
             f"/admin/roles/{role_id}",
@@ -1132,6 +1139,107 @@ def _run_http_role_flow(
     _assert(associated["total"] == 1 and associated["items"][0]["id"] == target["id"], "role user list is incorrect")
     _assert_no_sensitive_fields(associated, "role user list")
 
+    role_permissions_before = _expect(
+        client.get(f"/admin/roles/{role_id}/permissions", headers=read_headers),
+        200,
+        "get role permissions",
+    )
+    _assert(
+        role_permissions_before["permissions"] == []
+        and role_permissions_before["version"] == 2,
+        "new role has unexpected permissions",
+    )
+    permission_assignment_login = _login(client, target["email"], password, env)
+    permission_assignment_sid = _token_sid(permission_assignment_login)
+    sensitive_values.update(
+        (
+            str(permission_assignment_login["access_token"]),
+            str(permission_assignment_login["refresh_token"]),
+            permission_assignment_sid,
+        )
+    )
+    with engine.connect() as connection:
+        role_read_permission_id = connection.execute(
+            text("SELECT id FROM permissions WHERE name = 'role:read'")
+        ).scalar_one()
+    assigned_permissions = _expect(
+        client.put(
+            f"/admin/roles/{role_id}/permissions",
+            headers=_authorization(
+                str(logins["role:assign_permissions"]["access_token"]),
+                "role-phase5-permission-assignment",
+            ),
+            json={
+                "permission_ids": [role_read_permission_id],
+                "version": role_permissions_before["version"],
+            },
+        ),
+        200,
+        "replace role permissions",
+    )
+    _assert(
+        assigned_permissions["changed"] is True
+        and assigned_permissions["version"] == 3
+        and [item["name"] for item in assigned_permissions["permissions"]]
+        == ["role:read"],
+        "role permission replacement failed",
+    )
+    _assert(
+        assigned_permissions["revoked_sessions"] >= 1,
+        "role permission replacement did not revoke active sessions",
+    )
+    _assert_session_revoked(
+        engine,
+        redis_client,
+        env["SESSION_PREFIX"],
+        permission_assignment_sid,
+        "role_permissions_changed",
+        86_400,
+    )
+    _assert_access_and_refresh_revoked(
+        client,
+        str(permission_assignment_login["access_token"]),
+        str(permission_assignment_login["refresh_token"]),
+    )
+    repeated_permissions = _expect(
+        client.put(
+            f"/admin/roles/{role_id}/permissions",
+            headers=_authorization(
+                str(logins["role:assign_permissions"]["access_token"])
+            ),
+            json={
+                "permission_ids": [role_read_permission_id],
+                "version": assigned_permissions["version"],
+            },
+        ),
+        200,
+        "repeat role permission replacement",
+    )
+    _assert(
+        repeated_permissions["changed"] is False
+        and repeated_permissions["version"] == 3,
+        "repeat role permission replacement changed state",
+    )
+
+    target_after_permission_assignment = _login(
+        client,
+        target["email"],
+        password,
+        env,
+    )
+    _assert(
+        "role:read"
+        in str(target_after_permission_assignment["verified_claims"]["scope"]).split(),
+        "re-login did not include the assigned role permission",
+    )
+    sensitive_values.update(
+        (
+            str(target_after_permission_assignment["access_token"]),
+            str(target_after_permission_assignment["refresh_token"]),
+            _token_sid(target_after_permission_assignment),
+        )
+    )
+
     disabled = _expect(
         client.post(
             f"/admin/roles/{role_id}/disable",
@@ -1141,13 +1249,21 @@ def _run_http_role_flow(
         200,
         "disable role",
     )
-    _assert(disabled["changed"] is True and disabled["version"] == 3, "role disable failed")
-    _assert(disabled["revoked_sessions"] == 1, "role disable did not revoke the target session")
-    _assert_session_revoked(engine, redis_client, env["SESSION_PREFIX"], target_sid, "role_disabled", 86_400)
+    _assert(disabled["changed"] is True and disabled["version"] == 4, "role disable failed")
+    _assert(disabled["revoked_sessions"] >= 1, "role disable did not revoke the target session")
+    target_after_permission_sid = _token_sid(target_after_permission_assignment)
+    _assert_session_revoked(
+        engine,
+        redis_client,
+        env["SESSION_PREFIX"],
+        target_after_permission_sid,
+        "role_disabled",
+        86_400,
+    )
     _assert_access_and_refresh_revoked(
         client,
-        str(target_login["access_token"]),
-        str(target_login["refresh_token"]),
+        str(target_after_permission_assignment["access_token"]),
+        str(target_after_permission_assignment["refresh_token"]),
     )
     with engine.connect() as connection:
         association_counts = connection.execute(
@@ -1158,7 +1274,7 @@ def _run_http_role_flow(
             ),
             {"role_id": role_id},
         ).scalar_one()
-    _assert(association_counts == 1, "disabling the role removed an association")
+    _assert(association_counts == 2, "disabling the role removed an association")
 
     target_without_disabled = _login(client, target["email"], password, env)
     disabled_claims = target_without_disabled["verified_claims"]
@@ -1181,7 +1297,7 @@ def _run_http_role_flow(
         200,
         "repeat role disable",
     )
-    _assert(disabled_again["changed"] is False and disabled_again["version"] == 3, "repeat disable changed the role")
+    _assert(disabled_again["changed"] is False and disabled_again["version"] == 4, "repeat disable changed the role")
     _assert(disabled_again["disabled_reason"] == "role phase 5 maintenance", "repeat disable replaced the reason")
 
     enabled = _expect(
@@ -1192,7 +1308,7 @@ def _run_http_role_flow(
         200,
         "enable role",
     )
-    _assert(enabled["changed"] is True and enabled["version"] == 4, "role enable failed")
+    _assert(enabled["changed"] is True and enabled["version"] == 5, "role enable failed")
     enabled_again = _expect(
         client.post(
             f"/admin/roles/{role_id}/enable",
@@ -1201,7 +1317,7 @@ def _run_http_role_flow(
         200,
         "repeat role enable",
     )
-    _assert(enabled_again["changed"] is False and enabled_again["version"] == 4, "repeat enable changed the role")
+    _assert(enabled_again["changed"] is False and enabled_again["version"] == 5, "repeat enable changed the role")
 
     target_with_reenabled = _login(client, target["email"], password, env)
     reenabled_claims = target_with_reenabled["verified_claims"]
@@ -1252,7 +1368,10 @@ def _run_http_role_flow(
     final_target_login = _login(client, target["email"], password, env)
     final_claims = final_target_login["verified_claims"]
     _assert(final_claims["roles"] == [create_payload["name"]], "re-login did not reflect the final enabled role set")
-    _assert(final_claims["scope"] == "", "final target token unexpectedly retained permissions")
+    _assert(
+        set(str(final_claims["scope"]).split()) == {"role:read"},
+        "final target token did not retain the assigned role permission",
+    )
     sensitive_values.update(
         (
             str(final_target_login["access_token"]),
@@ -1349,11 +1468,19 @@ def _run_http_role_flow(
             ),
             {"permissions": list(ROLE_PERMISSIONS)},
         ).mappings().one()
-    expected_actions = {"role.created", "role.updated", "role.disabled", "role.enabled", "user.roles_assigned"}
+    expected_actions = {
+        "role.created",
+        "role.updated",
+        "role.permissions_assigned",
+        "role.disabled",
+        "role.enabled",
+        "user.roles_assigned",
+    }
     _assert(expected_actions <= {audit["action"] for audit in audits}, "role lifecycle audits are incomplete")
     expected_request_ids = {
         "role-phase5-create",
         "role-phase5-update",
+        "role-phase5-permission-assignment",
         "role-phase5-disable",
         "role-phase5-enable",
         "role-phase5-assignment",
@@ -1376,7 +1503,7 @@ def _run_http_role_flow(
             "permission_denials_verified": permission_denials,
             "lifecycle_audits_verified": len(expected_actions),
             "request_ids_verified": len(expected_request_ids),
-            "redis_revocations_verified": 2,
+            "redis_revocations_verified": 3,
             "old_sessions_rejected": True,
             "disabled_role_claim_filter": True,
             "reenabled_role_claim_restore": True,

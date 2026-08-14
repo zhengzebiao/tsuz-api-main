@@ -3,15 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.logging import request_id_context
 from app.models.audit_event import AuditEvent
-from app.models.role import Role, user_roles
+from app.models.permission import Permission
+from app.models.role import Role, role_permissions, user_roles
 from app.models.user import User
 from app.schemas.admin_role import AdminRoleCreate, AdminRoleUpdate
+from app.services.admin_permission_service import (
+    PermissionDisabledError,
+    PermissionNotDeclaredError,
+    PermissionNotFoundError,
+)
 from app.services.session_service import SessionService
 
 
@@ -252,6 +258,99 @@ class AdminRoleService:
         self.db.flush()
         return role, True, 0
 
+    def get_role_permissions(self, role_id: int) -> list[Permission]:
+        self.get_role(role_id)
+        return self._get_permissions_for_role(role_id)
+
+    def assign_permissions(
+        self,
+        role_id: int,
+        permission_ids: list[int],
+        version: int,
+        *,
+        actor_user_id: int,
+        request_id: str | None = None,
+    ) -> tuple[Role, list[Permission], bool, int]:
+        role = self._lock_role(role_id)
+        if role.version != version:
+            raise RoleVersionConflictError(RoleVersionConflictError.code)
+
+        current_permissions = self._get_permissions_for_role(role_id)
+        current_by_id = {
+            permission.id: permission for permission in current_permissions
+        }
+        target_ids = set(permission_ids)
+        target_permissions = self._get_permissions_by_ids(target_ids)
+        target_by_id = {
+            permission.id: permission for permission in target_permissions
+        }
+        if set(target_by_id) != target_ids:
+            raise PermissionNotFoundError(PermissionNotFoundError.code)
+
+        current_ids = set(current_by_id)
+        added_ids = target_ids - current_ids
+        removed_ids = current_ids - target_ids
+        for permission_id in sorted(added_ids):
+            permission = target_by_id[permission_id]
+            if not permission.is_declared:
+                raise PermissionNotDeclaredError(PermissionNotDeclaredError.code)
+            if not permission.is_enabled:
+                raise PermissionDisabledError(PermissionDisabledError.code)
+        if not added_ids and not removed_ids:
+            return role, current_permissions, False, 0
+
+        if role.name == self.ADMIN_ROLE_NAME and any(
+            current_by_id[permission_id].is_declared
+            and current_by_id[permission_id].is_enabled
+            for permission_id in removed_ids
+        ):
+            raise ProtectedRoleOperationError(ProtectedRoleOperationError.code)
+
+        before_permissions = self._permission_audit_values(current_permissions)
+        if removed_ids:
+            self.db.execute(
+                delete(role_permissions).where(
+                    role_permissions.c.role_id == role_id,
+                    role_permissions.c.permission_id.in_(removed_ids),
+                )
+            )
+        if added_ids:
+            self.db.execute(
+                role_permissions.insert(),
+                [
+                    {"role_id": role_id, "permission_id": permission_id}
+                    for permission_id in sorted(added_ids)
+                ],
+            )
+
+        now = self._now()
+        self._increment_version(role, now)
+        self.db.flush()
+        revoked_sessions = self._revoke_role_user_sessions(
+            role_id,
+            "role_permissions_changed",
+        )
+        assigned_permissions = sorted(
+            target_permissions,
+            key=lambda permission: (permission.name, permission.id),
+        )
+        self._add_audit(
+            actor_user_id=actor_user_id,
+            action="role.permissions_assigned",
+            target_id=role_id,
+            result="success",
+            request_id=request_id,
+            changes={
+                "permissions": {
+                    "from": before_permissions,
+                    "to": self._permission_audit_values(assigned_permissions),
+                },
+                "revoked_sessions": revoked_sessions,
+            },
+        )
+        self.db.flush()
+        return role, assigned_permissions, True, revoked_sessions
+
     def list_role_users(
         self,
         role_id: int,
@@ -298,6 +397,46 @@ class AdminRoleService:
         if role is None:
             raise RoleNotFoundError(RoleNotFoundError.code)
         return role
+
+    def _get_permissions_for_role(self, role_id: int) -> list[Permission]:
+        return list(
+            self.db.scalars(
+                select(Permission)
+                .join(
+                    role_permissions,
+                    role_permissions.c.permission_id == Permission.id,
+                )
+                .where(role_permissions.c.role_id == role_id)
+                .order_by(Permission.name, Permission.id)
+            ).all()
+        )
+
+    def _get_permissions_by_ids(
+        self,
+        permission_ids: set[int],
+    ) -> list[Permission]:
+        if not permission_ids:
+            return []
+        return list(
+            self.db.scalars(
+                select(Permission)
+                .where(Permission.id.in_(permission_ids))
+                .order_by(Permission.id)
+                .with_for_update()
+            ).all()
+        )
+
+    def _permission_audit_values(
+        self,
+        permissions: list[Permission],
+    ) -> list[dict[str, int | str]]:
+        return [
+            {"id": permission.id, "name": permission.name}
+            for permission in sorted(
+                permissions,
+                key=lambda permission: (permission.name, permission.id),
+            )
+        ]
 
     def _revoke_role_user_sessions(self, role_id: int, reason: str) -> int:
         user_ids = self.db.scalars(

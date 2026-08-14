@@ -37,6 +37,10 @@ class PermissionNotDeclaredError(AdminPermissionError):
     code = "PERMISSION_NOT_DECLARED"
 
 
+class PermissionDisabledError(AdminPermissionError):
+    code = "PERMISSION_DISABLED"
+
+
 @dataclass(frozen=True)
 class PermissionRecord:
     permission: Permission

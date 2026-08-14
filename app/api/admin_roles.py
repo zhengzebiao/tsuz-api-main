@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.api.dependencies import require_permissions
 from app.core.database import get_db
 from app.core.logging import request_id_context
+from app.models.permission import Permission
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.admin_role import (
@@ -15,10 +16,19 @@ from app.schemas.admin_role import (
     AdminRoleCreate,
     AdminRoleDisableRequest,
     AdminRoleListResponse,
+    AdminRolePermissionAssignment,
+    AdminRolePermissionSummary,
+    AdminRolePermissionsResponse,
     AdminRoleResponse,
     AdminRoleUpdate,
 )
 from app.schemas.admin_user import AdminUserListResponse, AdminUserResponse
+from app.services.admin_permission_service import (
+    AdminPermissionError,
+    PermissionDisabledError,
+    PermissionNotDeclaredError,
+    PermissionNotFoundError,
+)
 from app.services.admin_role_service import (
     AdminRoleError,
     AdminRoleService,
@@ -31,17 +41,20 @@ from app.services.admin_role_service import (
 router = APIRouter(prefix="/admin/roles", tags=["admin-roles"])
 
 
-_ERROR_STATUS_CODES: dict[type[AdminRoleError], int] = {
+_ERROR_STATUS_CODES: dict[type[AdminRoleError | AdminPermissionError], int] = {
     RoleNotFoundError: status.HTTP_404_NOT_FOUND,
+    PermissionNotFoundError: status.HTTP_404_NOT_FOUND,
     RoleNameAlreadyExistsError: status.HTTP_409_CONFLICT,
     RoleVersionConflictError: status.HTTP_409_CONFLICT,
     ProtectedRoleOperationError: status.HTTP_409_CONFLICT,
+    PermissionNotDeclaredError: status.HTTP_409_CONFLICT,
+    PermissionDisabledError: status.HTTP_409_CONFLICT,
 }
 
 _ResponseModel = TypeVar("_ResponseModel", bound=BaseModel)
 
 
-def _raise_admin_error(exc: AdminRoleError) -> None:
+def _raise_admin_error(exc: AdminRoleError | AdminPermissionError) -> None:
     status_code = next(
         (code for error_type, code in _ERROR_STATUS_CODES.items() if isinstance(exc, error_type)),
         status.HTTP_400_BAD_REQUEST,
@@ -65,6 +78,24 @@ def _action_response(role: Role, changed: bool, revoked_sessions: int) -> AdminR
     )
 
 
+def _role_permissions_response(
+    role: Role,
+    permissions: list[Permission],
+    changed: bool,
+    revoked_sessions: int,
+) -> AdminRolePermissionsResponse:
+    return AdminRolePermissionsResponse(
+        role_id=role.id,
+        permissions=[
+            AdminRolePermissionSummary.model_validate(permission)
+            for permission in permissions
+        ],
+        version=role.version,
+        changed=changed,
+        revoked_sessions=revoked_sessions,
+    )
+
+
 def _user_response(user: User) -> AdminUserResponse:
     return AdminUserResponse.model_validate(user)
 
@@ -74,7 +105,7 @@ def _execute_write(db: DbSession, operation: Callable[[], _ResponseModel]) -> _R
         response = operation()
         db.commit()
         return response
-    except AdminRoleError as exc:
+    except (AdminRoleError, AdminPermissionError) as exc:
         db.rollback()
         _raise_admin_error(exc)
     except Exception:
@@ -204,6 +235,62 @@ def enable_role(
             request_id=_request_id(),
         )
         return _action_response(role, changed, revoked_sessions)
+
+    return _execute_write(db, operation)
+
+
+@router.get(
+    "/{role_id}/permissions",
+    response_model=AdminRolePermissionsResponse,
+    summary="Get role permissions",
+)
+def get_role_permissions(
+    role_id: int,
+    _actor: User = Depends(require_permissions("role:read")),
+    db: DbSession = Depends(get_db),
+) -> AdminRolePermissionsResponse:
+    try:
+        service = AdminRoleService(db)
+        role = service.get_role(role_id)
+        return _role_permissions_response(
+            role,
+            service.get_role_permissions(role_id),
+            False,
+            0,
+        )
+    except (AdminRoleError, AdminPermissionError) as exc:
+        _raise_admin_error(exc)
+    raise AssertionError("unreachable")
+
+
+@router.put(
+    "/{role_id}/permissions",
+    response_model=AdminRolePermissionsResponse,
+    summary="Replace role permissions",
+)
+def assign_role_permissions(
+    role_id: int,
+    payload: AdminRolePermissionAssignment,
+    _request: Request,
+    actor: User = Depends(require_permissions("role:assign_permissions")),
+    db: DbSession = Depends(get_db),
+) -> AdminRolePermissionsResponse:
+    def operation() -> AdminRolePermissionsResponse:
+        role, permissions, changed, revoked_sessions = (
+            AdminRoleService(db).assign_permissions(
+                role_id,
+                payload.permission_ids,
+                payload.version,
+                actor_user_id=actor.id,
+                request_id=_request_id(),
+            )
+        )
+        return _role_permissions_response(
+            role,
+            permissions,
+            changed,
+            revoked_sessions,
+        )
 
     return _execute_write(db, operation)
 

@@ -870,9 +870,9 @@ def run_concurrency_validation(config: PermissionPhase5Config) -> dict[str, Any]
                 second_sync = second_future.result(timeout=15)
             _assert(sync_waited, "concurrent sync did not wait on advisory lock")
             _assert(
-                first_sync["created"] == 25
-                and first_sync["endpoint_bindings_added"] == 31
-                and first_sync["admin_grants_added"] == 25,
+                first_sync["created"] == 26
+                and first_sync["endpoint_bindings_added"] == 33
+                and first_sync["admin_grants_added"] == 26,
                 "first synchronization summary is incorrect",
             )
             _assert(
@@ -1247,7 +1247,7 @@ def run_concurrency_validation(config: PermissionPhase5Config) -> dict[str, Any]
                 "database": database.name,
                 "advisory_lock_waits_verified": 1,
                 "row_lock_waits_verified": 2,
-                "sync_counts_verified": [25, 31, 25],
+                "sync_counts_verified": [26, 33, 26],
                 "disable_changes": [disable_first[1], disable_second[1]],
                 "enable_changes": [enable_first[1], enable_second[1]],
                 "distinct_session_revocations": disable_first[2],
@@ -2157,9 +2157,9 @@ def _run_http_permission_flow(
         "permission disable audit revocation count is incorrect",
     )
     _assert(
-        catalog_counts["permissions"] == 25
-        and catalog_counts["endpoints"] == 31
-        and catalog_counts["admin_grants"] == 25,
+        catalog_counts["permissions"] == 26
+        and catalog_counts["endpoints"] == 33
+        and catalog_counts["admin_grants"] == 26,
         "final permission catalog counts are incorrect",
     )
     audit_text = json.dumps([dict(audit) for audit in audits], default=str)
@@ -2209,9 +2209,9 @@ def run_http_validation(config: PermissionPhase5Config) -> dict[str, Any]:
         second_sync = _permission_sync(env)
         check_sync = _permission_sync(env, "--check")
         _assert(
-            first_sync["created"] == 25
-            and first_sync["endpoint_bindings_added"] == 31
-            and first_sync["admin_grants_added"] == 25,
+            first_sync["created"] == 26
+            and first_sync["endpoint_bindings_added"] == 33
+            and first_sync["admin_grants_added"] == 26,
             "initial permission sync counts are incorrect",
         )
         _assert(

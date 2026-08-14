@@ -121,9 +121,9 @@ def test_first_sync_creates_real_catalog_bindings_and_admin_grants_idempotently(
 
     plan = service.build_plan(catalog)
 
-    assert len(plan.created) == 25
-    assert len(plan.endpoint_bindings_added) == 31
-    assert len(plan.admin_grants_added) == 25
+    assert len(plan.created) == 26
+    assert len(plan.endpoint_bindings_added) == 33
+    assert len(plan.admin_grants_added) == 26
     assert plan.session_user_ids == (admin_user.id,)
     assert db_session.scalar(select(func.count()).select_from(Permission)) == 0
 
@@ -131,18 +131,18 @@ def test_first_sync_creates_real_catalog_bindings_and_admin_grants_idempotently(
     db_session.commit()
 
     assert summary.to_dict() == {
-        "created": 25,
+        "created": 26,
         "restored": 0,
         "marked_missing": 0,
-        "endpoint_bindings_added": 31,
+        "endpoint_bindings_added": 33,
         "endpoint_bindings_removed": 0,
-        "admin_grants_added": 25,
+        "admin_grants_added": 26,
         "sessions_revoked": 2,
         "unchanged": 0,
     }
-    assert db_session.scalar(select(func.count()).select_from(Permission)) == 25
-    assert db_session.scalar(select(func.count()).select_from(PermissionEndpoint)) == 31
-    assert db_session.scalar(select(func.count()).select_from(role_permissions)) == 25
+    assert db_session.scalar(select(func.count()).select_from(Permission)) == 26
+    assert db_session.scalar(select(func.count()).select_from(PermissionEndpoint)) == 33
+    assert db_session.scalar(select(func.count()).select_from(role_permissions)) == 26
     permissions = db_session.scalars(select(Permission).order_by(Permission.name)).all()
     assert all(permission.display_name == permission.name for permission in permissions)
     assert all(permission.description == "" for permission in permissions)
@@ -163,7 +163,7 @@ def test_first_sync_creates_real_catalog_bindings_and_admin_grants_idempotently(
         "endpoint_bindings_removed": 0,
         "admin_grants_added": 0,
         "sessions_revoked": 0,
-        "unchanged": 25,
+        "unchanged": 26,
     }
     assert {permission.id: permission.version for permission in permissions} == versions
     assert sessions.calls == [(admin_user.id, "permission_sync")]
