@@ -26,7 +26,7 @@ def app_phase5_config() -> AppPhase5Config:
 def test_app_phase5_migration_roundtrip(app_phase5_config: AppPhase5Config) -> None:
     report = run_migration_validation(app_phase5_config)
 
-    assert report["current_revision"] == "0005_permission_management"
+    assert report["current_revision"] == "0006_email_registration"
     assert report["alembic_check"] == "clean"
     assert report["legacy_user_preserved"] is True
     assert report["app_columns_verified"] == 14

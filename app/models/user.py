@@ -20,6 +20,7 @@ class User(Base):
     disabled_reason: Mapped[str | None] = mapped_column(String(500))
     blacklisted_at: Mapped[datetime | None] = mapped_column(DateTime)
     blacklisted_reason: Mapped[str | None] = mapped_column(String(500))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

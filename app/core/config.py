@@ -32,6 +32,21 @@ class Settings(BaseSettings):
     refresh_token_prefix: str = "auth:test:refresh:"
     session_prefix: str = "auth:test:session:"
 
+    tencentcloud_secret_id: str = ""
+    tencentcloud_secret_key: str = ""
+    tencentcloud_region: str = "ap-guangzhou"
+    tencentcloud_ses_endpoint: str = "ses.tencentcloudapi.com"
+
+    email_from_address: str = "noreply@notify.tusz.online"
+    email_from_name: str = "tusz.online"
+    email_template_id: int = 57044
+    email_subject: str = "邮箱验证码"
+    email_code_expire_minutes: int = 10
+    email_code_length: int = 6
+    email_code_max_attempts: int = 5
+    email_code_resend_interval_seconds: int = 60
+    email_api_timeout_seconds: int = 10
+
     cors_allow_origins: str = "http://localhost:5173"
     cors_allow_credentials: bool = True
 

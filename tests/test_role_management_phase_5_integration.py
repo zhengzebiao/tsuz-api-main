@@ -29,7 +29,7 @@ def role_phase5_config() -> RolePhase5Config:
 def test_role_phase5_migration_roundtrip(role_phase5_config: RolePhase5Config) -> None:
     report = run_migration_validation(role_phase5_config)
 
-    assert report["current_revision"] == "0005_permission_management"
+    assert report["current_revision"] == "0006_email_registration"
     assert report["alembic_check"] == "clean"
     assert report["role_columns_verified"] == 9
     assert report["role_indexes_verified"] == 3

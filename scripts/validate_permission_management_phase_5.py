@@ -38,7 +38,7 @@ DEFAULT_ADMIN_DATABASE_URL = (
 )
 DEFAULT_REDIS_URL = "redis://127.0.0.1:56379/15"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
-HEAD_REVISION = "0005_permission_management"
+HEAD_REVISION = "0006_email_registration"
 PERMISSION_MANAGEMENT_PERMISSIONS = (
     "permission:read",
     "permission:update",

@@ -38,10 +38,25 @@ def test_user_management_fields_have_expected_defaults(db_session: DbSession) ->
     assert user.disabled_reason is None
     assert user.blacklisted_at is None
     assert user.blacklisted_reason is None
+    assert user.email_verified_at is None
     assert user.password_changed_at is None
     assert isinstance(user.created_at, datetime)
     assert isinstance(user.updated_at, datetime)
     assert user.version == 1
+
+
+def test_email_verification_timestamp_can_be_persisted(db_session: DbSession) -> None:
+    verified_at = datetime(2026, 8, 14, 10, 30)
+    user = User(
+        email="verified-user@example.com",
+        hashed_password="hashed-password",
+        email_verified_at=verified_at,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    assert user.email_verified_at == verified_at
 
 
 def test_session_revocation_metadata_can_be_persisted(db_session: DbSession) -> None:
