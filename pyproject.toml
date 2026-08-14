@@ -41,6 +41,7 @@ init = "python -m scripts.init_local"
 phase4-validate = "python scripts/validate_phase_4.py"
 app-phase5-validate = "python scripts/validate_app_phase_5.py"
 role-phase5-validate = "python scripts/validate_role_management_phase_5.py"
+permission-phase5-validate = "python scripts/validate_permission_management_phase_5.py"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
