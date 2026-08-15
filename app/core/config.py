@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     email_code_max_attempts: int = 5
     email_code_resend_interval_seconds: int = 60
     email_api_timeout_seconds: int = 10
+    email_challenge_prefix: str = "auth:test:email:challenge:"
+    email_send_limit_prefix: str = "auth:test:email:send:"
+    email_ip_send_limit_prefix: str = "auth:test:email:ip-send:"
+    email_send_limit_per_hour: int = 10
+    email_ip_send_limit_per_minute: int = 5
 
     cors_allow_origins: str = "http://localhost:5173"
     cors_allow_credentials: bool = True

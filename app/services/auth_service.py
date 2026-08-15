@@ -38,7 +38,10 @@ class AuthService:
             logger.warning("login failed username=%s reason=invalid_credentials", email)
             raise ValueError("invalid credentials")
 
-        user = self._lock_authenticatable_user(user.id)
+        return self.complete_login(user.id)
+
+    def complete_login(self, user_id: int) -> TokenResponse:
+        user = self._lock_authenticatable_user(user_id)
         sid = self._create_db_session(user)
         roles, scope = self._build_claims(user)
         access_token = self.tokens.create_access_token(

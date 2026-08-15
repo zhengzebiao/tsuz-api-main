@@ -176,6 +176,24 @@ def test_login_uses_db_user_password_and_rbac_claims(db_session: DbSession) -> N
     assert auth_session.status == "active"
 
 
+def test_complete_login_rechecks_user_state_and_uses_shared_token_path(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session)
+    service = AuthService(db_session)
+    tokens, refresh_tokens, _blacklist = attach_service_fakes(service)
+
+    response = service.complete_login(user.id)
+
+    assert response.access_token == "access-token"
+    assert response.refresh_token == "refresh-token"
+    sid = tokens.created[0]["sid"]
+    assert refresh_tokens.created == [{"user_id": str(user.id), "sid": sid}]
+
+    user.is_active = False
+    db_session.commit()
+    with pytest.raises(ValueError, match="invalid user"):
+        service.complete_login(user.id)
+
+
 def test_login_excludes_disabled_roles_and_permissions_from_claims(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
     attach_disabled_role_with_permission(db_session, user)
