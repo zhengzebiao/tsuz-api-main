@@ -167,6 +167,25 @@ jobs:
       REDIS_URL: ${{ secrets.REDIS_URL }}
       JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
       JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+      TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+      TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+      TENCENTCLOUD_REGION: ${{ vars.TENCENTCLOUD_REGION }}
+      TENCENTCLOUD_SES_ENDPOINT: ${{ vars.TENCENTCLOUD_SES_ENDPOINT }}
+      EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
+      EMAIL_FROM_NAME: ${{ vars.EMAIL_FROM_NAME }}
+      EMAIL_TEMPLATE_ID: ${{ vars.EMAIL_TEMPLATE_ID }}
+      EMAIL_SUBJECT: ${{ vars.EMAIL_SUBJECT }}
+      EMAIL_CODE_EXPIRE_MINUTES: ${{ vars.EMAIL_CODE_EXPIRE_MINUTES }}
+      EMAIL_CODE_LENGTH: ${{ vars.EMAIL_CODE_LENGTH }}
+      EMAIL_CODE_MAX_ATTEMPTS: ${{ vars.EMAIL_CODE_MAX_ATTEMPTS }}
+      EMAIL_CODE_RESEND_INTERVAL_SECONDS: ${{ vars.EMAIL_CODE_RESEND_INTERVAL_SECONDS }}
+      EMAIL_API_TIMEOUT_SECONDS: ${{ vars.EMAIL_API_TIMEOUT_SECONDS }}
+      EMAIL_CHALLENGE_PREFIX: ${{ vars.EMAIL_CHALLENGE_PREFIX }}
+      EMAIL_SEND_LIMIT_PREFIX: ${{ vars.EMAIL_SEND_LIMIT_PREFIX }}
+      EMAIL_IP_SEND_LIMIT_PREFIX: ${{ vars.EMAIL_IP_SEND_LIMIT_PREFIX }}
+      EMAIL_SEND_LIMIT_PER_HOUR: ${{ vars.EMAIL_SEND_LIMIT_PER_HOUR }}
+      EMAIL_IP_SEND_LIMIT_PER_MINUTE: ${{ vars.EMAIL_IP_SEND_LIMIT_PER_MINUTE }}
+      TRUSTED_PROXY_IPS: ${{ vars.TRUSTED_PROXY_IPS }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image name
@@ -208,6 +227,9 @@ jobs:
           : "${REDIS_URL:?Missing REDIS_URL secret}"
           : "${JWT_PUBLIC_KEY:?Missing JWT_PUBLIC_KEY secret}"
           : "${JWT_PRIVATE_KEY:?Missing JWT_PRIVATE_KEY secret}"
+          : "${TENCENTCLOUD_SECRET_ID:?Missing TENCENTCLOUD_SECRET_ID secret}"
+          : "${TENCENTCLOUD_SECRET_KEY:?Missing TENCENTCLOUD_SECRET_KEY secret}"
+          umask 077
           cat > .env.deploy.generated <<ENV
           DOCKER_IMAGE_NAME=$IMAGE_NAME
           APP_VERSION=$IMAGE_TAG
@@ -241,6 +263,25 @@ jobs:
           REFRESH_TOKEN_PREFIX=${REFRESH_TOKEN_PREFIX:-auth:$DEPLOY_ENV:refresh:}
           TOKEN_BLACKLIST_PREFIX=auth:$DEPLOY_ENV:blacklist:jti:
           SESSION_PREFIX=auth:$DEPLOY_ENV:session:
+          TENCENTCLOUD_SECRET_ID=$TENCENTCLOUD_SECRET_ID
+          TENCENTCLOUD_SECRET_KEY=$TENCENTCLOUD_SECRET_KEY
+          TENCENTCLOUD_REGION=${TENCENTCLOUD_REGION:-ap-guangzhou}
+          TENCENTCLOUD_SES_ENDPOINT=${TENCENTCLOUD_SES_ENDPOINT:-ses.tencentcloudapi.com}
+          EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-noreply@notify.tusz.online}
+          EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-tusz.online}
+          EMAIL_TEMPLATE_ID=${EMAIL_TEMPLATE_ID:-57044}
+          EMAIL_SUBJECT=${EMAIL_SUBJECT:-邮箱验证码}
+          EMAIL_CODE_EXPIRE_MINUTES=${EMAIL_CODE_EXPIRE_MINUTES:-10}
+          EMAIL_CODE_LENGTH=${EMAIL_CODE_LENGTH:-6}
+          EMAIL_CODE_MAX_ATTEMPTS=${EMAIL_CODE_MAX_ATTEMPTS:-5}
+          EMAIL_CODE_RESEND_INTERVAL_SECONDS=${EMAIL_CODE_RESEND_INTERVAL_SECONDS:-60}
+          EMAIL_API_TIMEOUT_SECONDS=${EMAIL_API_TIMEOUT_SECONDS:-10}
+          EMAIL_CHALLENGE_PREFIX=${EMAIL_CHALLENGE_PREFIX:-auth:$DEPLOY_ENV:email:challenge:}
+          EMAIL_SEND_LIMIT_PREFIX=${EMAIL_SEND_LIMIT_PREFIX:-auth:$DEPLOY_ENV:email:send:}
+          EMAIL_IP_SEND_LIMIT_PREFIX=${EMAIL_IP_SEND_LIMIT_PREFIX:-auth:$DEPLOY_ENV:email:ip-send:}
+          EMAIL_SEND_LIMIT_PER_HOUR=${EMAIL_SEND_LIMIT_PER_HOUR:-10}
+          EMAIL_IP_SEND_LIMIT_PER_MINUTE=${EMAIL_IP_SEND_LIMIT_PER_MINUTE:-5}
+          TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-127.0.0.1,::1}
           CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-https://app.example.com}
           CORS_ALLOW_CREDENTIALS=true
           OPENAPI_ENABLED=false
@@ -251,6 +292,8 @@ jobs:
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" docker-compose.deploy.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.deploy.yml"
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" nginx/default.conf "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/nginx/default.conf"
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" .env.deploy.generated "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+          rm -f .env.deploy.generated
       - name: Ensure external Docker network exists
         shell: bash
         run: |
