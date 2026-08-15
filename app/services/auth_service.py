@@ -27,15 +27,18 @@ class AuthService:
         self.blacklist = BlacklistService()
 
     def login(self, payload: LoginRequest) -> TokenResponse:
-        email = str(payload.username).lower()
-        user = self._get_user_by_email(email)
+        return self.login_by_email(str(payload.username), payload.password)
+
+    def login_by_email(self, email: str, password: str) -> TokenResponse:
+        normalized_email = email.strip().lower()
+        user = self._get_user_by_email(normalized_email)
         try:
             user = ensure_user_can_authenticate(user)
         except AuthenticationError as exc:
-            logger.warning("login failed username=%s reason=invalid_credentials", email)
+            logger.warning("login failed reason=invalid_credentials")
             raise ValueError("invalid credentials") from exc
-        if not verify_password(payload.password, user.hashed_password):
-            logger.warning("login failed username=%s reason=invalid_credentials", email)
+        if not verify_password(password, user.hashed_password):
+            logger.warning("login failed reason=invalid_credentials")
             raise ValueError("invalid credentials")
 
         return self.complete_login(user.id)

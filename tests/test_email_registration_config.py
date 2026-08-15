@@ -22,6 +22,7 @@ EMAIL_SETTING_ENV_VARS = (
     "EMAIL_IP_SEND_LIMIT_PREFIX",
     "EMAIL_SEND_LIMIT_PER_HOUR",
     "EMAIL_IP_SEND_LIMIT_PER_MINUTE",
+    "TRUSTED_PROXY_IPS",
 )
 
 
@@ -51,6 +52,7 @@ def test_email_registration_settings_use_confirmed_defaults(email_settings: Sett
     assert email_settings.email_ip_send_limit_prefix == "auth:test:email:ip-send:"
     assert email_settings.email_send_limit_per_hour == 10
     assert email_settings.email_ip_send_limit_per_minute == 5
+    assert email_settings.trusted_proxy_ips == "127.0.0.1,::1"
 
 
 def test_email_registration_numeric_settings_are_integers(email_settings: Settings) -> None:

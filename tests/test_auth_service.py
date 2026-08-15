@@ -176,6 +176,18 @@ def test_login_uses_db_user_password_and_rbac_claims(db_session: DbSession) -> N
     assert auth_session.status == "active"
 
 
+def test_login_by_email_normalizes_input_and_uses_shared_login_path(db_session: DbSession) -> None:
+    user = create_user_with_rbac(db_session)
+    service = AuthService(db_session)
+    tokens, refresh_tokens, _blacklist = attach_service_fakes(service)
+
+    response = service.login_by_email("  ADMIN@EXAMPLE.COM  ", "password123")
+
+    assert response.access_token == "access-token"
+    assert tokens.created[0]["user_id"] == str(user.id)
+    assert refresh_tokens.created[0]["user_id"] == str(user.id)
+
+
 def test_complete_login_rechecks_user_state_and_uses_shared_token_path(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
     service = AuthService(db_session)
@@ -264,6 +276,7 @@ def test_login_failure_logs_reason_without_password(db_session: DbSession, caplo
             service.login(LoginRequest(username="admin@example.com", password=raw_password))
 
     assert "reason=invalid_credentials" in caplog.text
+    assert "admin@example.com" not in caplog.text
     assert raw_password not in caplog.text
 
 
