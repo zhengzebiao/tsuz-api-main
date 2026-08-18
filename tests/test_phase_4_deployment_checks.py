@@ -140,6 +140,13 @@ def test_deploy_workflow_uses_environment_documentation_flags() -> None:
         assert f"{variable}=${{{variable}:-false}}" in workflow
 
 
+def test_deploy_workflow_uses_environment_service_name() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+
+    assert "SERVICE_NAME: ${{ vars.SERVICE_NAME }}" in workflow
+    assert "SERVICE_NAME=${SERVICE_NAME:-auth-service}" in workflow
+
+
 def test_deployment_migration_requires_explicit_forward_revision_and_backup() -> None:
     workflow = _read(MIGRATE_WORKFLOW)
 

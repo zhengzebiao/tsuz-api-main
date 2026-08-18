@@ -195,6 +195,7 @@ ccr.ccs.tencentyun.com/tsuz/tsuz-api-main-product
 | `COMPOSE_PROJECT_NAME` | Init 和 Deploy 共用的显式 Docker Compose 项目名称 |
 | `DOCKER_NETWORK_NAME` | Docker 外部网络名称 |
 | `APP_ENV` | 应用环境名称 |
+| `SERVICE_NAME` | 服务名称，同时用作 OpenAPI 文档标题，默认 `auth-service` |
 | `JWT_ISSUER` | JWT issuer |
 | `JWT_AUDIENCE` | JWT audience |
 | `CORS_ALLOW_ORIGINS` | 允许的跨域来源 |

@@ -314,6 +314,7 @@ jobs:
       NGINX_PORT: ${{ vars.NGINX_PORT }}
       APP_ENV: ${{ vars.APP_ENV }}
       DOCKER_NETWORK_NAME: ${{ vars.DOCKER_NETWORK_NAME }}
+      SERVICE_NAME: ${{ vars.SERVICE_NAME }}
       JWT_ISSUER: ${{ vars.JWT_ISSUER }}
       JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE }}
       CORS_ALLOW_ORIGINS: ${{ vars.CORS_ALLOW_ORIGINS }}
@@ -437,7 +438,7 @@ jobs:
           WEB_CONCURRENCY=4
           GUNICORN_TIMEOUT=60
           GUNICORN_GRACEFUL_TIMEOUT=30
-          SERVICE_NAME=auth-service
+          SERVICE_NAME=${SERVICE_NAME:-auth-service}
           API_PREFIX=/api
           DATABASE_URL=$DATABASE_URL
           DB_SSLMODE=disable
