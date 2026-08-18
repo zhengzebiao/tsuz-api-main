@@ -1,4 +1,5 @@
 import logging
+import os
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,20 +12,28 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ADMIN_EMAIL = "admin@example.com"
-DEFAULT_ADMIN_PASSWORD = "password123"
 DEFAULT_ROLE = "admin"
 
 
-def ensure_admin_user(db: Session) -> User:
-    user = db.scalar(select(User).where(User.email == DEFAULT_ADMIN_EMAIL))
+def get_seed_credentials() -> tuple[str, str]:
+    email = os.getenv("SEED_ADMIN_EMAIL", "").strip()
+    password = os.getenv("SEED_ADMIN_PASSWORD", "")
+    if not email:
+        raise RuntimeError("SEED_ADMIN_EMAIL is required")
+    if not password:
+        raise RuntimeError("SEED_ADMIN_PASSWORD is required")
+    return email, password
+
+
+def ensure_admin_user(db: Session, *, email: str, password: str) -> User:
+    user = db.scalar(select(User).where(User.email == email))
     if user is not None:
-        logger.info("seed skipped existing admin user email=%s", DEFAULT_ADMIN_EMAIL)
+        logger.info("seed skipped existing admin user email=%s", email)
         return user
-    user = User(email=DEFAULT_ADMIN_EMAIL, hashed_password=hash_password(DEFAULT_ADMIN_PASSWORD), is_active=True)
+    user = User(email=email, hashed_password=hash_password(password), is_active=True)
     db.add(user)
     db.flush()
-    logger.info("seed created admin user email=%s", DEFAULT_ADMIN_EMAIL)
+    logger.info("seed created admin user email=%s", email)
     return user
 
 
@@ -54,9 +63,9 @@ def ensure_user_role(db: Session, user: User, role: Role) -> None:
     logger.info("seed attached role user_id=%s role=%s", user.id, role.name)
 
 
-def seed(db: Session) -> None:
+def seed(db: Session, *, email: str, password: str) -> None:
     logger.info("seed started target=python-main")
-    admin = ensure_admin_user(db)
+    admin = ensure_admin_user(db, email=email, password=password)
     role = ensure_role(db, DEFAULT_ROLE)
     ensure_user_role(db, admin, role)
     logger.info("seed completed target=python-main")
@@ -64,9 +73,10 @@ def seed(db: Session) -> None:
 
 def main() -> None:
     configure_logging()
+    email, password = get_seed_credentials()
     db = SessionLocal()
     try:
-        seed(db)
+        seed(db, email=email, password=password)
         db.commit()
     except Exception:
         db.rollback()

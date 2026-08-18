@@ -160,7 +160,11 @@ def test_postgresql_advisory_lock_serializes_concurrent_sync() -> None:
         SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
         try:
             with SessionLocal() as db:
-                seed(db)
+                seed(
+                    db,
+                    email="permission-sync-admin@example.com",
+                    password="permission-sync-test-password",
+                )
                 db.commit()
 
             first_locked = threading.Event()

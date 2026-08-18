@@ -119,6 +119,10 @@ def _run_command(command: Sequence[str], *, env: dict[str, str], secrets: Sequen
     return output
 
 
+PHASE4_ADMIN_EMAIL = "phase4-admin@example.com"
+PHASE4_ADMIN_PASSWORD = "phase4-test-password"
+
+
 def _runtime_env(database_url: str, redis_url: str, redis_prefix: str) -> dict[str, str]:
     private_key, public_key = _generate_jwt_keys()
     env = os.environ.copy()
@@ -145,6 +149,8 @@ def _runtime_env(database_url: str, redis_url: str, redis_prefix: str) -> dict[s
             "DOCS_ENABLED": "false",
             "REDOC_ENABLED": "false",
             "WEB_CONCURRENCY": "1",
+            "SEED_ADMIN_EMAIL": PHASE4_ADMIN_EMAIL,
+            "SEED_ADMIN_PASSWORD": PHASE4_ADMIN_PASSWORD,
         }
     )
     return env
@@ -499,7 +505,7 @@ def _run_http_management_flow(
     env: dict[str, str],
     suffix: str,
 ) -> dict[str, Any]:
-    admin_login = _login(client, "admin@example.com", "password123")
+    admin_login = _login(client, PHASE4_ADMIN_EMAIL, PHASE4_ADMIN_PASSWORD)
     admin_access = str(admin_login["access_token"])
     admin_headers = _authorization(admin_access)
 

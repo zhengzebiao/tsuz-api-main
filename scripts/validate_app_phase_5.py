@@ -25,7 +25,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from redis import Redis
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -231,6 +232,8 @@ def _runtime_env(database_url: str, redis_url: str, redis_prefix: str) -> dict[s
             "DOCS_ENABLED": "false",
             "REDOC_ENABLED": "false",
             "WEB_CONCURRENCY": "1",
+            "SEED_ADMIN_EMAIL": "app-phase5-admin@example.com",
+            "SEED_ADMIN_PASSWORD": "app-phase5-test-password",
         }
     )
     return env
@@ -305,7 +308,7 @@ def run_migration_validation(config: AppPhase5Config) -> dict[str, Any]:
                 "version",
             }
             _assert(set(columns) == expected_columns, "apps table columns do not match the model")
-            for column_name in {
+            for column_name in (
                 "id",
                 "app_id",
                 "app_secret_hash",
@@ -317,9 +320,9 @@ def run_migration_validation(config: AppPhase5Config) -> dict[str, Any]:
                 "created_at",
                 "updated_at",
                 "version",
-            }:
+            ):
                 _assert(columns[column_name]["nullable"] is False, f"{column_name} must be NOT NULL")
-            for column_name in {"icon_url", "disabled_at", "disabled_reason"}:
+            for column_name in ("icon_url", "disabled_at", "disabled_reason"):
                 _assert(columns[column_name]["nullable"] is True, f"{column_name} must be nullable")
             _assert(
                 {"ix_apps_id", "ix_apps_app_id", "ix_apps_name", "ix_apps_is_enabled"} <= set(indexes),
@@ -725,10 +728,12 @@ def _run_http_app_flow(
     client: httpx.Client,
     engine: Engine,
     permission_users: dict[str, dict[str, str]],
+    admin_email: str,
+    admin_password: str,
 ) -> tuple[dict[str, Any], set[str]]:
     from app.core.security import verify_app_secret
 
-    admin_login = _login(client, "admin@example.com", "password123")
+    admin_login = _login(client, admin_email, admin_password)
     admin_token = str(admin_login["access_token"])
     none_login = _login(client, permission_users["none"]["email"], permission_users["none"]["password"])
     none_token = str(none_login["access_token"])
@@ -931,7 +936,8 @@ def _run_http_app_flow(
             {"app_id": app_id},
         ).mappings().all()
         admin_id = connection.execute(
-            text("SELECT id FROM users WHERE email = 'admin@example.com'")
+            text("SELECT id FROM users WHERE email = :email"),
+            {"email": admin_email},
         ).scalar_one()
     app_secret_hash = str(stored["app_secret_hash"])
     sensitive_values.add(app_secret_hash)
@@ -1023,12 +1029,22 @@ def run_http_validation(config: AppPhase5Config) -> dict[str, Any]:
             stderr=subprocess.STDOUT,
         )
         result: dict[str, Any] | None = None
-        sensitive_values: set[str] = {env["JWT_PRIVATE_KEY"], env["JWT_PUBLIC_KEY"], "password123"}
+        sensitive_values: set[str] = {
+            env["JWT_PRIVATE_KEY"],
+            env["JWT_PUBLIC_KEY"],
+            env["SEED_ADMIN_PASSWORD"],
+        }
         flow_error: Exception | None = None
         try:
             _wait_for_api(base_url, process)
             with httpx.Client(base_url=base_url, timeout=15) as client:
-                result, flow_secrets = _run_http_app_flow(client, engine, permission_users)
+                result, flow_secrets = _run_http_app_flow(
+                    client,
+                    engine,
+                    permission_users,
+                    env["SEED_ADMIN_EMAIL"],
+                    env["SEED_ADMIN_PASSWORD"],
+                )
                 sensitive_values.update(flow_secrets)
         except Exception as exc:
             flow_error = exc

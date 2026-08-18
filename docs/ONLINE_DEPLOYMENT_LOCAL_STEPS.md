@@ -156,23 +156,29 @@ docker compose \
   run --rm --no-deps api alembic current
 ```
 
-## 7. 测试环境初始化默认用户
+## 7. 初始化管理员用户
 
-线上部署默认不自动 seed；如果是本地或测试环境需要默认账号，显式执行：
+当前 GitHub 正常不可变 tag Deploy 会在启动 API/nginx 前自动执行 seed，管理员邮箱和密码来自对应 Environment 的 `SEED_ADMIN_EMAIL`、`SEED_ADMIN_PASSWORD` Secrets；历史镜像回滚不执行 seed。
+
+仅在本地手工部署流程中，可通过当前 shell 环境把凭据注入一次性容器（不要写入示例、日志或提交）：
 
 ```bash
+read -r -p "Seed admin email: " SEED_ADMIN_EMAIL
+read -r -s -p "Seed admin password: " SEED_ADMIN_PASSWORD
+printf '\n'
+export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
+
 docker compose \
   --env-file .env \
   -f docker-compose.deploy.yml \
-  run --rm --no-deps api python -m app.seed
+  run --rm --no-deps \
+  -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD \
+  api python -m app.seed
+
+unset SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
 ```
 
-默认测试账号：
-
-```text
-username: admin@example.com
-password: password123
-```
+seed 会创建或复用该管理员及 `admin` 角色，不会重置已有用户密码，也不会创建 API permissions；权限应另行运行 permission synchronization。
 
 ## 8. 再启动 deploy
 
@@ -215,14 +221,7 @@ curl --fail -i http://127.0.0.1:8000/health
 curl --fail -i http://127.0.0.1:8080/health
 ```
 
-测试登录：
-
-```bash
-curl -i \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin@example.com","password":"password123"}' \
-  http://127.0.0.1:8080/auth/login
-```
+测试登录时使用实际配置的 seed 管理员邮箱和密码，并避免把密码保存进 shell history。可以临时运行交互式脚本或 API 客户端，不要在命令行明文参数中写入密码。
 
 ## 10. 日常重新部署 API
 

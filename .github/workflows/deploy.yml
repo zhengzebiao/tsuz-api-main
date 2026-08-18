@@ -21,7 +21,10 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   resolve-deploy:
@@ -33,13 +36,17 @@ jobs:
       should_build: ${{ steps.resolve.outputs.should_build }}
     steps:
       - id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            environment="${{ inputs.environment }}"
-            image_tag="${{ inputs.image_tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            environment="$REQUESTED_ENVIRONMENT"
+            image_tag="$REQUESTED_IMAGE_TAG"
             should_build="false"
           else
             tag="$GITHUB_REF_NAME"
@@ -62,6 +69,10 @@ jobs:
 
           if [ "$image_tag" = "latest" ] || [ "${image_tag##*:}" = "latest" ]; then
             echo "Refusing to deploy a latest tag. Use an immutable test-v*.*.* or product-v*.*.* image tag." >&2
+            exit 1
+          fi
+          if [[ ! "$image_tag" =~ ^(test|product)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid image tag: $image_tag" >&2
             exit 1
           fi
 
@@ -95,41 +106,185 @@ jobs:
       DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
       DOCKER_REGISTRY_USERNAME: ${{ vars.DOCKER_REGISTRY_USERNAME }}
       DOCKER_REGISTRY_TOKEN: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+      DOCKER_BUILD_PLATFORM: ${{ vars.DOCKER_BUILD_PLATFORM }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_REPO_PATH: ${{ vars.DEPLOY_REPO_PATH }}
     steps:
-      - uses: actions/checkout@v4
       - name: Resolve image name
         id: image
         shell: bash
         run: |
           set -euo pipefail
-          registry="${DOCKER_REGISTRY:-ghcr.io}"
-          image_name="$DOCKER_IMAGE_NAME"
-          if [ -z "$image_name" ]; then
-            image_name="$registry/$GITHUB_REPOSITORY"
-          fi
+          : "${DOCKER_REGISTRY:?Missing DOCKER_REGISTRY environment variable}"
+          : "${DOCKER_IMAGE_NAME:?Missing DOCKER_IMAGE_NAME environment variable}"
+          registry="${DOCKER_REGISTRY%/}"
+          registry="$(printf '%s' "$registry" | tr '[:upper:]' '[:lower:]')"
+          image_name="${DOCKER_IMAGE_NAME%/}"
           image_name="$(printf '%s' "$image_name" | tr '[:upper:]' '[:lower:]')"
+          if [ "${image_name#"$registry"/}" = "$image_name" ]; then
+            echo "DOCKER_IMAGE_NAME must start with $registry/." >&2
+            exit 1
+          fi
+          if [[ ! "$registry" =~ ^[a-z0-9.-]+(:[0-9]+)?$ ]]; then
+            echo "Invalid DOCKER_REGISTRY: $registry" >&2
+            exit 1
+          fi
+          if [[ ! "$image_name" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+$ ]]; then
+            echo "Invalid DOCKER_IMAGE_NAME: $image_name" >&2
+            exit 1
+          fi
           echo "registry=$registry" >> "$GITHUB_OUTPUT"
           echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
-      - name: Log in to container registry
+      - name: Configure SSH
         shell: bash
         run: |
           set -euo pipefail
-          username="${DOCKER_REGISTRY_USERNAME:-$GITHUB_ACTOR}"
-          if [ -z "$DOCKER_REGISTRY_TOKEN" ]; then
-            echo "Missing DOCKER_REGISTRY_TOKEN secret." >&2
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST environment variable}"
+          : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
+          : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
+          : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY secret}"
+          if ! [[ "${DEPLOY_PORT:-22}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_PORT:-22}" -lt 1 ] || [ "${DEPLOY_PORT:-22}" -gt 65535 ]; then
+            echo "DEPLOY_PORT must be between 1 and 65535." >&2
             exit 1
           fi
-          printf '%s' "$DOCKER_REGISTRY_TOKEN" | docker login "${{ steps.image.outputs.registry }}" -u "$username" --password-stdin
-      - name: Build Docker image
+          if [[ ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9._/-]+$ ]]; then
+            echo "DEPLOY_PATH may only contain path-safe characters." >&2
+            exit 1
+          fi
+          if [[ ! "${DOCKER_REGISTRY_USERNAME:-}" =~ ^[a-zA-Z0-9@._-]+$ ]]; then
+            echo "Invalid DOCKER_REGISTRY_USERNAME." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+      - name: Build and push image on deployment server
         env:
           IMAGE_NAME: ${{ steps.image.outputs.image_name }}
+          REGISTRY: ${{ steps.image.outputs.registry }}
         shell: bash
-        run: docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
-      - name: Push Docker image
-        env:
-          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
-        shell: bash
-        run: docker push "$IMAGE_NAME:$IMAGE_TAG"
+        run: |
+          set -euo pipefail
+          : "${DOCKER_REGISTRY_TOKEN:?Missing DOCKER_REGISTRY_TOKEN secret}"
+          username="${DOCKER_REGISTRY_USERNAME:?Missing DOCKER_REGISTRY_USERNAME environment variable}"
+          repo_path="${DEPLOY_REPO_PATH:-$DEPLOY_PATH/source}"
+          platform="${DOCKER_BUILD_PLATFORM:-linux/amd64}"
+          repository_url="git@github.com:$GITHUB_REPOSITORY.git"
+
+          case "$repo_path" in
+            /*) ;;
+            *)
+              echo "DEPLOY_REPO_PATH must be an absolute path: $repo_path" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$repo_path" = "/" ] || [ "$repo_path" = "$DEPLOY_PATH" ]; then
+            echo "DEPLOY_REPO_PATH must be a dedicated source directory separate from DEPLOY_PATH." >&2
+            exit 1
+          fi
+          if [[ ! "$platform" =~ ^linux/[a-z0-9_]+$ ]]; then
+            echo "Invalid DOCKER_BUILD_PLATFORM: $platform" >&2
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9._/-]+$ ]] || [[ ! "$repo_path" =~ ^/[a-zA-Z0-9._/-]+$ ]]; then
+            echo "DEPLOY_PATH and DEPLOY_REPO_PATH may only contain path-safe characters." >&2
+            exit 1
+          fi
+          if [[ ! "$REGISTRY" =~ ^[a-z0-9.-]+(:[0-9]+)?$ ]]; then
+            echo "Invalid DOCKER_REGISTRY: $REGISTRY" >&2
+            exit 1
+          fi
+          if [[ ! "$username" =~ ^[a-zA-Z0-9@._-]+$ ]]; then
+            echo "Invalid DOCKER_REGISTRY_USERNAME." >&2
+            exit 1
+          fi
+          if [[ ! "$IMAGE_NAME" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+$ ]]; then
+            echo "Invalid DOCKER_IMAGE_NAME: $IMAGE_NAME" >&2
+            exit 1
+          fi
+          if [[ ! "$IMAGE_TAG" =~ ^(test|product)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid image tag: $IMAGE_TAG" >&2
+            exit 1
+          fi
+          if [[ ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid GitHub commit SHA." >&2
+            exit 1
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "REPO_PATH='$repo_path' REPOSITORY_URL='$repository_url' IMAGE_NAME='$IMAGE_NAME' IMAGE_TAG='$IMAGE_TAG' EXPECTED_SHA='$GITHUB_SHA' BUILD_PLATFORM='$platform' bash -s" <<'REMOTE_BUILD'
+          set -euo pipefail
+          umask 077
+          command -v git >/dev/null 2>&1 || { echo "git is required on the deployment server." >&2; exit 1; }
+          command -v docker >/dev/null 2>&1 || { echo "docker is required on the deployment server." >&2; exit 1; }
+          if ! git config --global --get-all safe.directory | grep -Fxq "$REPO_PATH"; then
+            git config --global --add safe.directory "$REPO_PATH"
+          fi
+
+          if [ -e "$REPO_PATH" ] && [ ! -d "$REPO_PATH/.git" ]; then
+            echo "DEPLOY_REPO_PATH exists but is not a Git repository: $REPO_PATH" >&2
+            exit 1
+          fi
+          if [ ! -d "$REPO_PATH/.git" ]; then
+            mkdir -p "$(dirname "$REPO_PATH")"
+            git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$REPO_PATH"
+          fi
+
+          cd "$REPO_PATH"
+          current_remote="$(git remote get-url origin)"
+          if [ "$current_remote" != "$REPOSITORY_URL" ]; then
+            echo "Unexpected Git origin: $current_remote" >&2
+            echo "Expected Git origin: $REPOSITORY_URL" >&2
+            exit 1
+          fi
+
+          tag_ref="refs/tags/$IMAGE_TAG"
+          remote_object="$(git ls-remote origin "$tag_ref" | cut -f1)"
+          remote_peeled="$(git ls-remote origin "$tag_ref^{}" | cut -f1)"
+          if [ "$remote_object" != "$EXPECTED_SHA" ] && [ "$remote_peeled" != "$EXPECTED_SHA" ]; then
+            echo "Remote tag commit mismatch: expected $EXPECTED_SHA, resolved ${remote_peeled:-$remote_object}" >&2
+            exit 1
+          fi
+          git fetch --force --no-tags origin "$tag_ref:$tag_ref"
+          fetched_object="$(git rev-parse "$tag_ref")"
+          fetched_commit="$(git rev-parse "$tag_ref^{}")"
+          if [ "$fetched_object" != "$EXPECTED_SHA" ] && [ "$fetched_commit" != "$EXPECTED_SHA" ]; then
+            echo "Fetched tag commit mismatch: expected $EXPECTED_SHA, fetched $fetched_commit" >&2
+            exit 1
+          fi
+          git checkout --detach --force "$fetched_commit"
+          git clean -ffdx
+          current_commit="$(git rev-parse HEAD)"
+          if [ "$current_commit" != "$fetched_commit" ]; then
+            echo "Deployment checkout mismatch: expected $fetched_commit, checked out $current_commit" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Deployment source worktree is not clean after checkout." >&2
+            exit 1
+          fi
+
+          docker build --pull=false --platform "$BUILD_PLATFORM" \
+            --label "org.opencontainers.image.revision=$fetched_commit" \
+            --label "org.opencontainers.image.version=$IMAGE_TAG" \
+            -t "$IMAGE_NAME:$IMAGE_TAG" .
+          docker image inspect "$IMAGE_NAME:$IMAGE_TAG" >/dev/null
+          REMOTE_BUILD
+
+          printf '%s' "$DOCKER_REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login '$REGISTRY' -u '$username' --password-stdin"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker push '$IMAGE_NAME:$IMAGE_TAG' && docker image inspect '$IMAGE_NAME:$IMAGE_TAG' --format='Built image {{.Id}}; digests={{.RepoDigests}}'"
 
   deploy:
     needs:
@@ -140,6 +295,7 @@ jobs:
     environment: ${{ needs.resolve-deploy.outputs.environment }}
     env:
       IMAGE_TAG: ${{ needs.resolve-deploy.outputs.image_tag }}
+      SHOULD_BUILD: ${{ needs.resolve-deploy.outputs.should_build }}
       DEPLOY_ENV: ${{ needs.resolve-deploy.outputs.environment }}
       DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
       DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
@@ -188,17 +344,31 @@ jobs:
       TRUSTED_PROXY_IPS: ${{ vars.TRUSTED_PROXY_IPS }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-deploy.outputs.image_tag }}
       - name: Resolve image name
         id: image
         shell: bash
         run: |
           set -euo pipefail
-          registry="${DOCKER_REGISTRY:-ghcr.io}"
-          image_name="$DOCKER_IMAGE_NAME"
-          if [ -z "$image_name" ]; then
-            image_name="$registry/$GITHUB_REPOSITORY"
-          fi
+          : "${DOCKER_REGISTRY:?Missing DOCKER_REGISTRY environment variable}"
+          : "${DOCKER_IMAGE_NAME:?Missing DOCKER_IMAGE_NAME environment variable}"
+          registry="${DOCKER_REGISTRY%/}"
+          registry="$(printf '%s' "$registry" | tr '[:upper:]' '[:lower:]')"
+          image_name="${DOCKER_IMAGE_NAME%/}"
           image_name="$(printf '%s' "$image_name" | tr '[:upper:]' '[:lower:]')"
+          if [ "${image_name#"$registry"/}" = "$image_name" ]; then
+            echo "DOCKER_IMAGE_NAME must start with $registry/." >&2
+            exit 1
+          fi
+          if [[ ! "$registry" =~ ^[a-z0-9.-]+(:[0-9]+)?$ ]]; then
+            echo "Invalid DOCKER_REGISTRY: $registry" >&2
+            exit 1
+          fi
+          if [[ ! "$image_name" =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+$ ]]; then
+            echo "Invalid DOCKER_IMAGE_NAME: $image_name" >&2
+            exit 1
+          fi
           echo "registry=$registry" >> "$GITHUB_OUTPUT"
           echo "image_name=$image_name" >> "$GITHUB_OUTPUT"
       - name: Configure SSH
@@ -209,6 +379,18 @@ jobs:
           : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
           : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
           : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY secret}"
+          if ! [[ "${DEPLOY_PORT:-22}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_PORT:-22}" -lt 1 ] || [ "${DEPLOY_PORT:-22}" -gt 65535 ]; then
+            echo "DEPLOY_PORT must be between 1 and 65535." >&2
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9._/-]+$ ]]; then
+            echo "DEPLOY_PATH may only contain path-safe characters." >&2
+            exit 1
+          fi
+          if [[ ! "${DOCKER_REGISTRY_USERNAME:-}" =~ ^[a-zA-Z0-9@._-]+$ ]]; then
+            echo "Invalid DOCKER_REGISTRY_USERNAME." >&2
+            exit 1
+          fi
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
@@ -305,15 +487,60 @@ jobs:
           fi
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
             "docker network inspect '$network_name' >/dev/null 2>&1 || docker network create '$network_name'"
-      - name: Deploy with docker compose
+      - name: Run normal release database bootstrap
+        if: ${{ env.SHOULD_BUILD == 'true' }}
+        env:
+          SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
-          username="${DOCKER_REGISTRY_USERNAME:-$GITHUB_ACTOR}"
-          if [ -n "${DOCKER_REGISTRY_TOKEN:-}" ]; then
-            printf '%s' "$DOCKER_REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "docker login '${{ steps.image.outputs.registry }}' -u '$username' --password-stdin"
+          : "${SEED_ADMIN_EMAIL:?Missing SEED_ADMIN_EMAIL secret}"
+          : "${SEED_ADMIN_PASSWORD:?Missing SEED_ADMIN_PASSWORD secret}"
+          if [[ "$SEED_ADMIN_EMAIL" == *$'\n'* ]] || [[ "$SEED_ADMIN_EMAIL" == *$'\r'* ]]; then
+            echo "SEED_ADMIN_EMAIL must be a single-line value." >&2
+            exit 1
           fi
-          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml pull api && docker compose --env-file .env -f docker-compose.deploy.yml up -d --no-build api nginx"
+          if [[ "$SEED_ADMIN_PASSWORD" == *$'\n'* ]] || [[ "$SEED_ADMIN_PASSWORD" == *$'\r'* ]]; then
+            echo "SEED_ADMIN_PASSWORD must be a single-line value." >&2
+            exit 1
+          fi
+          {
+            printf 'SEED_ADMIN_EMAIL=%q\n' "$SEED_ADMIN_EMAIL"
+            printf 'SEED_ADMIN_PASSWORD=%q\n' "$SEED_ADMIN_PASSWORD"
+            cat <<'REMOTE_BOOTSTRAP'
+          set -euo pipefail
+          export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
+          compose=(docker compose --env-file .env -f docker-compose.deploy.yml)
+          "${compose[@]}" run --rm --no-deps api alembic current
+          "${compose[@]}" run --rm --no-deps api alembic upgrade head
+          "${compose[@]}" run --rm --no-deps api alembic current
+          "${compose[@]}" run --rm --no-deps -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD api python -m app.seed
+          unset SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
+          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions --dry-run
+          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions
+          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions --check
+          REMOTE_BOOTSTRAP
+          } | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && bash -s"
+      - name: Deploy with docker compose
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.image_name }}
+          REGISTRY: ${{ steps.image.outputs.registry }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$SHOULD_BUILD" = "true" ]; then
+            ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "docker image inspect '$IMAGE_NAME:$IMAGE_TAG' >/dev/null && cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml up -d --no-build api nginx"
+          else
+            : "${DOCKER_REGISTRY_TOKEN:?Missing DOCKER_REGISTRY_TOKEN secret for rollback}"
+            username="${DOCKER_REGISTRY_USERNAME:?Missing DOCKER_REGISTRY_USERNAME environment variable}"
+            printf '%s' "$DOCKER_REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "docker login '$REGISTRY' -u '$username' --password-stdin"
+            ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml pull api && docker compose --env-file .env -f docker-compose.deploy.yml up -d --no-build api nginx"
+          fi
       - name: Wait for API container health
         shell: bash
         run: |

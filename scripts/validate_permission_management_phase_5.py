@@ -26,7 +26,8 @@ from redis import Redis
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -291,6 +292,8 @@ def _runtime_env(database_url: str, redis_url: str, redis_prefix: str) -> dict[s
             "DOCS_ENABLED": "false",
             "REDOC_ENABLED": "false",
             "WEB_CONCURRENCY": "1",
+            "SEED_ADMIN_EMAIL": "permission-phase5-admin@example.com",
+            "SEED_ADMIN_PASSWORD": "permission-phase5-test-password",
         }
     )
     return env
@@ -434,7 +437,7 @@ def run_migration_validation(config: PermissionPhase5Config) -> dict[str, Any]:
                 set(columns) == permission_columns,
                 "permissions table columns do not match the model",
             )
-            for column_name in {
+            for column_name in (
                 "id",
                 "name",
                 "display_name",
@@ -444,12 +447,12 @@ def run_migration_validation(config: PermissionPhase5Config) -> dict[str, Any]:
                 "created_at",
                 "updated_at",
                 "version",
-            }:
+            ):
                 _assert(
                     columns[column_name]["nullable"] is False,
                     f"permissions.{column_name} must be NOT NULL",
                 )
-            for column_name in {"disabled_at", "disabled_reason", "missing_at"}:
+            for column_name in ("disabled_at", "disabled_reason", "missing_at"):
                 _assert(
                     columns[column_name]["nullable"] is True,
                     f"permissions.{column_name} must be nullable",
@@ -819,7 +822,11 @@ def run_concurrency_validation(config: PermissionPhase5Config) -> dict[str, Any]
             get_redis.cache_clear()
             catalog = scan_permission_routes(create_app())
             with SessionLocal() as db:
-                seed(db)
+                seed(
+                    db,
+                    email="permission-phase5-admin@example.com",
+                    password="permission-phase5-test-password",
+                )
                 db.commit()
 
             first_locked = threading.Event()
@@ -1625,7 +1632,7 @@ def _run_http_permission_flow(
             )
         )
 
-    admin_login = _login(client, "admin@example.com", "password123", env)
+    admin_login = _login(client, env["SEED_ADMIN_EMAIL"], env["SEED_ADMIN_PASSWORD"], env)
     admin_claims = admin_login["verified_claims"]
     _assert(
         set(PERMISSION_MANAGEMENT_PERMISSIONS)
@@ -1637,7 +1644,7 @@ def _run_http_permission_flow(
             str(admin_login["access_token"]),
             str(admin_login["refresh_token"]),
             _token_sid(admin_login),
-            "password123",
+            env["SEED_ADMIN_PASSWORD"],
         )
     )
 
@@ -2263,7 +2270,7 @@ def run_http_validation(config: PermissionPhase5Config) -> dict[str, Any]:
             env["JWT_PRIVATE_KEY"],
             env["JWT_PUBLIC_KEY"],
             str(fixtures["password"]),
-            "password123",
+            env["SEED_ADMIN_PASSWORD"],
             database.url,
             make_url(database.url).password or "",
             config.redis_url,

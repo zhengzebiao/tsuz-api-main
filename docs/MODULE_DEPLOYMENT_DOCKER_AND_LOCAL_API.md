@@ -413,10 +413,13 @@ curl --fail -i http://127.0.0.1:8080/health
 
 ```bash
 pdm install
+cp .env.local.example .env
+$EDITOR .env  # 替换两个 CHANGE_ME seed 值
+chmod 600 .env
 pdm run init
 ```
 
-或直接使用 `docker-compose.yml`。它会从当前源码构建并运行 API、PostgreSQL、Redis 和 nginx，API 使用 Uvicorn reload 和源码挂载。这个方式适合一次性本地环境，不应与模式 A 在同一端口同时运行，否则 `8000`、`5432`、`6379` 或 `8080` 会冲突。
+初始化器不会创建已知的本地管理员默认密码，因此会拒绝模板中的 `CHANGE_ME`。或直接使用 `docker-compose.yml`。它会从当前源码构建并运行 API、PostgreSQL、Redis 和 nginx，API 使用 Uvicorn reload 和源码挂载。这个方式适合一次性本地环境，不应与模式 A 在同一端口同时运行，否则 `8000`、`5432`、`6379` 或 `8080` 会冲突。
 
 ---
 

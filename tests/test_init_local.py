@@ -10,10 +10,16 @@ import pytest
 
 from scripts import init_local
 
-
 PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----\n"
 PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\npublic\n-----END PUBLIC KEY-----\n"
-TEMPLATE = "DATABASE_URL=postgres\nREDIS_URL=redis\nJWT_PRIVATE_KEY=\"__JWT_PRIVATE_KEY__\"\nJWT_PUBLIC_KEY=\"__JWT_PUBLIC_KEY__\"\n"
+TEMPLATE = (
+    "DATABASE_URL=postgres\n"
+    "REDIS_URL=redis\n"
+    'JWT_PRIVATE_KEY="__JWT_PRIVATE_KEY__"\n'
+    'JWT_PUBLIC_KEY="__JWT_PUBLIC_KEY__"\n'
+    "SEED_ADMIN_EMAIL=admin@example.com\n"
+    "SEED_ADMIN_PASSWORD=local-seed-password\n"
+)
 
 
 def write_template(path: Path) -> None:
@@ -30,8 +36,8 @@ def test_ensure_env_file_generates_keys_and_restricts_permissions(tmp_path: Path
     assert created is True
     content = env_file.read_text()
     assert "__JWT_" not in content
-    assert "JWT_PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----\"" in content
-    assert "JWT_PUBLIC_KEY=\"-----BEGIN PUBLIC KEY-----\\npublic\\n-----END PUBLIC KEY-----\"" in content
+    assert 'JWT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----"' in content
+    assert 'JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\\npublic\\n-----END PUBLIC KEY-----"' in content
     assert os.stat(env_file).st_mode & 0o777 == 0o600
     assert not list(tmp_path.glob("..env.*"))
 
@@ -59,8 +65,30 @@ def test_validate_env_file_rejects_missing_values_and_placeholders(tmp_path: Pat
 
     env_file.write_text(
         'DATABASE_URL=postgres\nREDIS_URL=redis\nJWT_PRIVATE_KEY="CHANGE_ME"\nJWT_PUBLIC_KEY="public"\n'
+        "SEED_ADMIN_EMAIL=admin@example.com\nSEED_ADMIN_PASSWORD=local-seed-password\n"
     )
     with pytest.raises(RuntimeError, match="placeholder"):
+        init_local.validate_env_file(env_file)
+
+
+def test_repository_local_template_requires_custom_seed_credentials(tmp_path: Path) -> None:
+    template = init_local.ENV_TEMPLATE.read_text()
+    env_file = tmp_path / ".env"
+    env_file.write_text(template.replace("__JWT_PRIVATE_KEY__", "private").replace("__JWT_PUBLIC_KEY__", "public"))
+    os.chmod(env_file, 0o600)
+
+    assert "SEED_ADMIN_EMAIL=CHANGE_ME" in template
+    assert "SEED_ADMIN_PASSWORD=CHANGE_ME" in template
+    with pytest.raises(RuntimeError, match="placeholder"):
+        init_local.validate_env_file(env_file)
+
+
+def test_validate_env_file_requires_seed_credentials(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text('DATABASE_URL=postgres\nREDIS_URL=redis\nJWT_PRIVATE_KEY="private"\nJWT_PUBLIC_KEY="public"\n')
+    os.chmod(env_file, 0o600)
+
+    with pytest.raises(RuntimeError, match="SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD"):
         init_local.validate_env_file(env_file)
 
 
@@ -68,6 +96,7 @@ def test_validate_env_file_rejects_insecure_permissions(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         'DATABASE_URL=postgres\nREDIS_URL=redis\nJWT_PRIVATE_KEY="private"\nJWT_PUBLIC_KEY="public"\n'
+        "SEED_ADMIN_EMAIL=admin@example.com\nSEED_ADMIN_PASSWORD=local-seed-password\n"
     )
     os.chmod(env_file, 0o644)
 
@@ -111,8 +140,7 @@ def test_ensure_api_image_falls_back_only_when_an_image_exists(monkeypatch: pyte
 def test_wait_for_compose_services_requires_healthy_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, ...]] = []
     output = "\n".join(
-        json.dumps({"Service": service, "State": "running", "Health": "healthy"})
-        for service in ("postgres", "redis")
+        json.dumps({"Service": service, "State": "running", "Health": "healthy"}) for service in ("postgres", "redis")
     )
 
     def fake_run(command: tuple[str, ...], **_: object) -> subprocess.CompletedProcess[str]:
@@ -144,7 +172,9 @@ def test_initialize_local_runs_commands_in_order(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(init_local, "check_prerequisites", lambda: None)
     monkeypatch.setattr(init_local, "ensure_env_file", lambda: False)
     monkeypatch.setattr(init_local, "ensure_api_image", lambda: commands.append(("ensure-image",)))
-    monkeypatch.setattr(init_local, "wait_for_compose_services", lambda services, **_: commands.append(("wait", *services)))
+    monkeypatch.setattr(
+        init_local, "wait_for_compose_services", lambda services, **_: commands.append(("wait", *services))
+    )
     monkeypatch.setattr(init_local, "wait_for_health", lambda url, **_: commands.append(("health", url)))
 
     def fake_run(command: tuple[str, ...], **_: object) -> subprocess.CompletedProcess[str]:
@@ -179,7 +209,9 @@ def test_initialize_local_runs_commands_in_order(monkeypatch: pytest.MonkeyPatch
     ]
 
 
-def test_main_returns_nonzero_and_prints_diagnostics(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_returns_nonzero_and_prints_diagnostics(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(init_local, "initialize_local", Mock(side_effect=RuntimeError("boom")))
     monkeypatch.setattr(init_local, "print_diagnostics", Mock())
 

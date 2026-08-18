@@ -32,4 +32,5 @@ volumes:
 
 networks:
   backend:
+    external: true
     name: ${DOCKER_NETWORK_NAME:-product-backend}

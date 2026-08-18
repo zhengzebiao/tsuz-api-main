@@ -1,0 +1,200 @@
+name: Init
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose Docker infrastructure will be initialized
+        required: true
+        type: choice
+        options:
+          - test
+          - product
+      confirmation:
+        description: Type INITIALIZE-test or INITIALIZE-product
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: init-${{ github.repository }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  initialize-infrastructure:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DOCKER_NETWORK_NAME: ${{ vars.DOCKER_NETWORK_NAME }}
+      POSTGRES_CONTAINER_NAME: ${{ vars.POSTGRES_CONTAINER_NAME }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+      REDIS_CONTAINER_NAME: ${{ vars.REDIS_CONTAINER_NAME }}
+      REDIS_PORT: ${{ vars.REDIS_PORT }}
+      INIT_HEALTH_RETRIES: ${{ vars.INIT_HEALTH_RETRIES }}
+      INIT_HEALTH_INTERVAL_SECONDS: ${{ vars.INIT_HEALTH_INTERVAL_SECONDS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate initialization request
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="INITIALIZE-$DEPLOY_ENV"
+          if [ "$CONFIRMATION" != "$expected" ]; then
+            echo "Confirmation must be exactly $expected." >&2
+            exit 1
+          fi
+          : "${DEPLOY_HOST:?Missing DEPLOY_HOST environment variable}"
+          : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
+          : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
+          : "${DOCKER_NETWORK_NAME:?Missing DOCKER_NETWORK_NAME environment variable}"
+          : "${POSTGRES_CONTAINER_NAME:?Missing POSTGRES_CONTAINER_NAME environment variable}"
+          : "${POSTGRES_DB:?Missing POSTGRES_DB environment variable}"
+          : "${POSTGRES_USER:?Missing POSTGRES_USER environment variable}"
+          : "${POSTGRES_PASSWORD:?Missing POSTGRES_PASSWORD secret}"
+          : "${REDIS_CONTAINER_NAME:?Missing REDIS_CONTAINER_NAME environment variable}"
+          : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY secret}"
+          for value_name in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
+            value=${!value_name}
+            if [[ "$value" == *$'\n'* ]] || [[ "$value" == *$'\r'* ]]; then
+              echo "$value_name must be a single-line value." >&2
+              exit 1
+            fi
+          done
+          if ! [[ "${DEPLOY_PORT:-22}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_PORT:-22}" -lt 1 ] || [ "${DEPLOY_PORT:-22}" -gt 65535 ]; then
+            echo "DEPLOY_PORT must be between 1 and 65535." >&2
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9._/-]+$ ]]; then
+            echo "DEPLOY_PATH may only contain path-safe characters." >&2
+            exit 1
+          fi
+          if [[ ! "$DOCKER_NETWORK_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+            echo "Invalid DOCKER_NETWORK_NAME." >&2
+            exit 1
+          fi
+          for container_name in "$POSTGRES_CONTAINER_NAME" "$REDIS_CONTAINER_NAME"; do
+            if [[ ! "$container_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+              echo "Invalid infrastructure container name." >&2
+              exit 1
+            fi
+          done
+          for port in "${POSTGRES_PORT:-5432}" "${REDIS_PORT:-6379}"; do
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+              echo "Infrastructure ports must be between 1 and 65535." >&2
+              exit 1
+            fi
+          done
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+      - name: Upload infrastructure configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          keys = (
+              "DOCKER_NETWORK_NAME",
+              "POSTGRES_CONTAINER_NAME",
+              "POSTGRES_DB",
+              "POSTGRES_USER",
+              "POSTGRES_PASSWORD",
+              "POSTGRES_PORT",
+              "REDIS_CONTAINER_NAME",
+              "REDIS_PORT",
+          )
+          defaults = {"POSTGRES_PORT": "5432", "REDIS_PORT": "6379"}
+          lines = []
+          for key in keys:
+              value = os.environ.get(key) or defaults.get(key, "")
+              if any(character in value for character in "\x00\r\n"):
+                  raise SystemExit(f"{key} must be a single-line value without NUL bytes")
+              value = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+              lines.append(f'{key}="{value}"')
+          Path(".env.infra.generated").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          trap 'rm -f .env.infra.generated' EXIT
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" docker-compose.infra.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.infra.yml"
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" .env.infra.generated "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env.infra.next"
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "chmod 600 '$DEPLOY_PATH/.env.infra.next' && mv -f '$DEPLOY_PATH/.env.infra.next' '$DEPLOY_PATH/.env.infra'"
+      - name: Start and verify PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          retries="${INIT_HEALTH_RETRIES:-30}"
+          interval="${INIT_HEALTH_INTERVAL_SECONDS:-2}"
+          if ! [[ "$retries" =~ ^[1-9][0-9]*$ ]]; then
+            echo "INIT_HEALTH_RETRIES must be a positive integer." >&2
+            exit 1
+          fi
+          if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]]; then
+            echo "INIT_HEALTH_INTERVAL_SECONDS must be a positive integer." >&2
+            exit 1
+          fi
+          {
+            printf 'DOCKER_NETWORK_NAME=%q\n' "$DOCKER_NETWORK_NAME"
+            printf 'POSTGRES_CONTAINER_NAME=%q\n' "$POSTGRES_CONTAINER_NAME"
+            printf 'POSTGRES_USER=%q\n' "$POSTGRES_USER"
+            printf 'POSTGRES_DB=%q\n' "$POSTGRES_DB"
+            printf 'REDIS_CONTAINER_NAME=%q\n' "$REDIS_CONTAINER_NAME"
+            printf 'INIT_HEALTH_RETRIES=%q\n' "$retries"
+            printf 'INIT_HEALTH_INTERVAL_SECONDS=%q\n' "$interval"
+            cat <<'REMOTE_INIT'
+          set -euo pipefail
+          command -v docker >/dev/null 2>&1 || { echo "docker is required on the deployment server." >&2; exit 1; }
+          docker compose version >/dev/null
+          docker network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK_NAME"
+          docker compose --env-file .env.infra -f docker-compose.infra.yml config --quiet
+          docker compose --env-file .env.infra -f docker-compose.infra.yml up -d postgres redis
+
+          for attempt in $(seq 1 "$INIT_HEALTH_RETRIES"); do
+            postgres_ready=false
+            redis_ready=false
+            if docker exec "$POSTGRES_CONTAINER_NAME" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+              postgres_ready=true
+            fi
+            if docker exec "$REDIS_CONTAINER_NAME" redis-cli ping 2>/dev/null | grep -Fxq PONG; then
+              redis_ready=true
+            fi
+            if [ "$postgres_ready" = "true" ] && [ "$redis_ready" = "true" ]; then
+              docker compose --env-file .env.infra -f docker-compose.infra.yml ps postgres redis
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL and Redis ($attempt/$INIT_HEALTH_RETRIES)."
+            sleep "$INIT_HEALTH_INTERVAL_SECONDS"
+          done
+          echo "Infrastructure did not become ready." >&2
+          docker compose --env-file .env.infra -f docker-compose.infra.yml ps postgres redis
+          docker compose --env-file .env.infra -f docker-compose.infra.yml logs --tail=100 postgres redis
+          exit 1
+          REMOTE_INIT
+          } | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && bash -s"

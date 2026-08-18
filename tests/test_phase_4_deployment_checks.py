@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEPLOY_WORKFLOW = ROOT_DIR / ".github/workflows/deploy.yml"
+INIT_WORKFLOW = ROOT_DIR / ".github/workflows/init.yml"
 MIGRATE_WORKFLOW = ROOT_DIR / ".github/workflows/migrate.yml"
 COMPOSE_FILE = ROOT_DIR / "docker-compose.deploy.yml"
 NGINX_CONFIG = ROOT_DIR / "nginx/default.conf"
@@ -20,14 +20,77 @@ def test_deploy_workflow_injects_ses_secrets_without_logging_them() -> None:
 
     assert "TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}" in workflow
     assert "TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}" in workflow
-    assert ": \"${TENCENTCLOUD_SECRET_ID:?Missing TENCENTCLOUD_SECRET_ID secret}\"" in workflow
-    assert ": \"${TENCENTCLOUD_SECRET_KEY:?Missing TENCENTCLOUD_SECRET_KEY secret}\"" in workflow
+    assert ': "${TENCENTCLOUD_SECRET_ID:?Missing TENCENTCLOUD_SECRET_ID secret}"' in workflow
+    assert ': "${TENCENTCLOUD_SECRET_KEY:?Missing TENCENTCLOUD_SECRET_KEY secret}"' in workflow
     assert "umask 077" in workflow
     assert "chmod 600 '$DEPLOY_PATH/.env'" in workflow
     assert "rm -f .env.deploy.generated" in workflow
     assert 'echo "$TENCENTCLOUD_SECRET' not in workflow
     assert "RUN_PHASE4_REAL_SES" not in workflow
     assert "PHASE4_SES_RECIPIENT" not in workflow
+
+
+def test_init_workflow_is_independent_and_non_destructive() -> None:
+    workflow = _read(INIT_WORKFLOW)
+
+    assert "workflow_dispatch:" in workflow
+    assert "INITIALIZE-test" in workflow
+    assert "INITIALIZE-product" in workflow
+    assert "POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}" in workflow
+    assert "docker network inspect" in workflow
+    assert "up -d postgres redis" in workflow
+    assert "pg_isready" in workflow
+    assert "redis-cli ping" in workflow
+    assert "deploy.yml" not in workflow
+    assert "workflow_call" not in workflow
+    assert ".initialized" not in workflow
+    assert "down -v" not in workflow
+    assert "volume rm" not in workflow
+    assert "system prune" not in workflow
+    assert "api nginx" not in workflow
+    assert "app.seed" not in workflow
+    assert "sync_permissions" not in workflow
+    assert "alembic" not in workflow
+    assert ". ./.env.infra" not in workflow
+
+
+def test_normal_deploy_bootstrap_is_ordered_and_excludes_rollback() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+    bootstrap_start = workflow.index("- name: Run normal release database bootstrap")
+    deploy_start = workflow.index("- name: Deploy with docker compose", bootstrap_start)
+    bootstrap = workflow[bootstrap_start:deploy_start]
+    rollback = workflow[deploy_start:]
+
+    assert "if: ${{ env.SHOULD_BUILD == 'true' }}" in bootstrap
+    assert "SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}" in bootstrap
+    assert "SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}" in bootstrap
+    assert ': "${SEED_ADMIN_EMAIL:?Missing SEED_ADMIN_EMAIL secret}"' in bootstrap
+    assert ': "${SEED_ADMIN_PASSWORD:?Missing SEED_ADMIN_PASSWORD secret}"' in bootstrap
+    commands = (
+        "api alembic current",
+        "api alembic upgrade head",
+        "api alembic current",
+        "api python -m app.seed",
+        "api python -m app.commands.sync_permissions --dry-run",
+        "api python -m app.commands.sync_permissions\n",
+        "api python -m app.commands.sync_permissions --check",
+    )
+    positions: list[int] = []
+    cursor = 0
+    for command in commands:
+        position = bootstrap.index(command, cursor)
+        positions.append(position)
+        cursor = position + len(command)
+    assert positions == sorted(positions)
+    assert "docker compose --env-file .env -f docker-compose.deploy.yml up" not in bootstrap
+    assert "SEED_ADMIN_EMAIL=" not in workflow[workflow.index("cat > .env.deploy.generated") : bootstrap_start]
+    assert "SEED_ADMIN_PASSWORD=" not in workflow[workflow.index("cat > .env.deploy.generated") : bootstrap_start]
+    assert "printf 'SEED_ADMIN_EMAIL=%q\\n'" in bootstrap
+    assert "printf 'SEED_ADMIN_PASSWORD=%q\\n'" in bootstrap
+    assert ".env.seed" not in workflow
+    assert "alembic" not in rollback
+    assert "app.seed" not in rollback
+    assert "sync_permissions" not in rollback
 
 
 def test_deploy_workflow_writes_isolated_email_namespaces() -> None:

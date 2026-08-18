@@ -29,13 +29,16 @@ The recommended first-time setup runs the API, PostgreSQL, Redis, and nginx in D
 
 ```bash
 pdm install
+cp .env.local.example .env
+$EDITOR .env  # replace both CHANGE_ME seed values
+chmod 600 .env
 pdm run init
 ```
 
 `init` performs the following steps:
 
 1. Checks Docker Compose and OpenSSL are installed.
-2. Creates `.env` from `.env.local.example` if it does not already exist.
+2. Creates `.env` from `.env.local.example` if it does not already exist. Before the first run, replace both `CHANGE_ME` seed placeholders with local-only values; the initializer rejects placeholders rather than creating a known default administrator.
 3. Generates a local RSA-2048 JWT key pair and stores it only in `.env` with mode `0600`.
 4. Starts PostgreSQL and Redis, waits for healthy containers, builds the API image, applies Alembic migrations, runs the idempotent local admin seed, and synchronizes the API permission declarations into PostgreSQL. If Docker Hub is temporarily unavailable and a prior local image exists, initialization warns and falls back to that image; otherwise retry after `docker pull python:3.12-slim` succeeds.
 5. Starts the API and nginx and checks both `http://127.0.0.1:8000/health` and `http://127.0.0.1:8080/health`.
@@ -92,7 +95,7 @@ This template uses PDM with standard `pyproject.toml` metadata.
 
 ## Environment Files
 
-- `.env.local.example` is the non-secret template for the Docker-based local workflow. `pdm run init` copies it to `.env` and generates the JWT key pair.
+- `.env.local.example` is the non-secret template for the Docker-based local workflow. Copy it to `.env`, replace both `CHANGE_ME` seed placeholders, and run `pdm run init` to generate the JWT key pair and initialize the stack.
 - `.env` is local secret material: it is ignored by Git, must not be committed, and should remain mode `0600`.
 - If `.env` already exists, initialization preserves it. If it is missing required values, contains placeholders, or has overly broad permissions, fix or back it up before rerunning `pdm run init`.
 - `.env.test.example` enables Swagger, ReDoc, and OpenAPI JSON.
@@ -144,7 +147,8 @@ This template uses PDM with standard `pyproject.toml` metadata.
 - Use `pdm run migrate` to apply Alembic migrations manually only when your active environment points to reachable services. For the Compose workflow, run the equivalent command with `docker compose run --rm --no-deps api alembic upgrade head`.
 - Use `alembic downgrade -1` or `alembic downgrade <revision_id>` only for development, test, or pre-release rollback drills.
 - The local seed is idempotent and only ensures the default admin user, admin role, and their user-role association. API permissions come exclusively from `require_permissions(...)` declarations and are created or updated by `pdm run permission-sync`.
-- Product does not auto-run seed or permission synchronization. Run migration, reviewed admin bootstrap if needed, `permission-sync --dry-run`, `permission-sync`, and `permission-sync --check` as separate reviewed operations before starting the new application version.
+- Every normal immutable-tag Deploy runs `alembic current`, `alembic upgrade head`, `alembic current`, the environment-driven admin seed, and permission synchronization (`--dry-run`, apply, and `--check`) before starting the new API/nginx containers. Historical-image rollback runs none of these database bootstrap commands.
+- Configure `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` as GitHub Environment Secrets. They are used only by the one-shot normal-release seed command and must not be copied into the persistent runtime `.env`.
 - The first production dry run must explicitly review historical permissions that are no longer declared, including the current legacy `user:write`; synchronization marks these permissions missing but does not delete their IDs or role associations.
 - Prefer immutable image rollback and forward-compatible repair migrations over relying on product database downgrade.
 
@@ -172,7 +176,7 @@ This template uses PDM with standard `pyproject.toml` metadata.
 
 ## GitHub Actions, Secrets, and Environments
 
-The generated `.github/workflows/ci.yml` is CI-only: it runs PDM install, lint, pytest, Alembic state checks, and a Docker build. The generated `.github/workflows/deploy.yml` owns tag release and rollback.
+The generated `.github/workflows/ci.yml` is CI-only: it runs PDM install, lint, pytest, Alembic state checks, and a Docker build. The independent `.github/workflows/init.yml` manually initializes only the external Docker network, PostgreSQL, and Redis. The generated `.github/workflows/deploy.yml` owns tag release, normal-release database bootstrap, and rollback; Init does not trigger or call Deploy.
 
 ## Release Deploy and Rollback
 
@@ -183,22 +187,25 @@ This template includes a dedicated GitHub Actions Deploy workflow plus separate 
 | `docker-compose.yml` | Local development with api, PostgreSQL, Redis, and nginx | can be rebuilt freely |
 | `docker-compose.infra.yml` | Docker PostgreSQL and Redis for long-lived test/product infrastructure | start once and preserve volumes |
 | `docker-compose.deploy.yml` | Application release and rollback for api + nginx | updated for each image tag |
-| `.github/workflows/deploy.yml` | Tag release and workflow_dispatch rollback | runs on immutable image tags |
-| `.github/workflows/migrate.yml` | Manual Alembic migration workflow | runs only by reviewed workflow_dispatch |
+| `.github/workflows/init.yml` | Independent manual infrastructure initializer | starts/checks only the external network, PostgreSQL, and Redis |
+| `.github/workflows/deploy.yml` | Tag release, normal-release bootstrap, and workflow_dispatch rollback | runs on immutable image tags |
+| `.github/workflows/migrate.yml` | Independent manual Alembic maintenance workflow | runs only by workflow_dispatch |
 | `.env.deploy.example` | Example remote runtime environment | copy to real secrets/variables |
 
 ### GitHub Environments
 
-Create GitHub Environments named `test` and `product`. Product should use GitHub Environment protection rules and required reviewers before deployment or migration.
+Create GitHub Environments named `test` and `product`. This deployment design does not require GitHub Environment Required reviewers; any production approval policy is optional and external to the Init/Deploy workflow relationship.
 
 Recommended Variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `DOCKER_REGISTRY` | Registry host, for example `ghcr.io` |
-| `DOCKER_IMAGE_NAME` | Full image name, for example `ghcr.io/owner/auth-service` |
-| `DOCKER_REGISTRY_USERNAME` | Registry username, defaults to the GitHub actor when empty |
-| `DEPLOY_HOST` / `DEPLOY_PORT` / `DEPLOY_USER` / `DEPLOY_PATH` | SSH deployment target |
+| `DOCKER_REGISTRY` | TCR host, for example `ccr.ccs.tencentyun.com` |
+| `DOCKER_IMAGE_NAME` | Full TCR image name, for example `ccr.ccs.tencentyun.com/tsuz/tsuz-api-main-test` |
+| `DOCKER_REGISTRY_USERNAME` | TCR username, normally the Tencent Cloud account ID for Personal Edition |
+| `DEPLOY_HOST` / `DEPLOY_PORT` / `DEPLOY_USER` / `DEPLOY_PATH` | SSH deployment target and runtime directory |
+| `DEPLOY_REPO_PATH` | Dedicated absolute source checkout directory on the deployment server |
+| `DOCKER_BUILD_PLATFORM` | Target image platform, normally `linux/amd64` |
 | `CONTAINER_NAME` / `APP_PORT` / `NGINX_PORT` | Runtime container and port settings |
 | `APP_ENV` / `DOCKER_NETWORK_NAME` | Deployment environment and shared Docker network |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | Token issuer and audience expected by the service |
@@ -215,16 +222,21 @@ Recommended Secrets:
 | `REDIS_URL` | Redis connection string |
 | `JWT_PUBLIC_KEY` | RS256 verification public key |
 | `JWT_PRIVATE_KEY` | RS256 signing private key, only for python-main |
+| `POSTGRES_PASSWORD` | PostgreSQL password consumed by the independent Init workflow |
+| `SEED_ADMIN_EMAIL` | Admin email consumed only by normal-release seed |
+| `SEED_ADMIN_PASSWORD` | Admin password consumed only by normal-release seed; never put it in persistent `.env` |
 
 - `python-main` owns `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY`; keep the private key only in the auth service environment.
 
 ### Docker Infra
 
-Start PostgreSQL and Redis separately from app releases:
+Run Actions -> Init manually before the first deployment, selecting `test` or `product` and entering the exact confirmation `INITIALIZE-test` or `INITIALIZE-product`. Init is safe to repeat: it creates/reuses the external Docker network, starts only PostgreSQL and Redis, and waits for `pg_isready` and `redis-cli ping`. It does not trigger Deploy, start API/nginx, run migrations, seed, synchronize permissions, delete volumes, or prune Docker data.
+
+For direct server diagnostics, the equivalent commands are:
 
 ```bash
-docker compose --env-file .env.infra -f docker-compose.infra.yml up -d
-docker compose --env-file .env.infra -f docker-compose.infra.yml ps
+docker compose --env-file .env.infra -f docker-compose.infra.yml up -d postgres redis
+docker compose --env-file .env.infra -f docker-compose.infra.yml ps postgres redis
 ```
 
 Do not run `docker compose --env-file .env.infra -f docker-compose.infra.yml down -v` in product unless you intentionally want to delete database and Redis volumes.
@@ -243,7 +255,7 @@ git tag product-v1.0.1
 git push origin product-v1.0.1
 ```
 
-The workflow builds and pushes `test-v*.*.*` or `product-v*.*.*` Docker images. It refuses `latest` and refuses cross-environment deploys.
+For release tags, the workflow connects to the deployment server, checks out the exact tag with a read-only GitHub Deploy Key, builds the image locally, and pushes it to TCR. Before switching containers, it uses that image to run Alembic current/upgrade/current, seed, and permission synchronization dry-run/apply/check; only a fully successful bootstrap is followed by API/nginx startup and health/smoke/public checks. It refuses `latest` and cross-environment deploys. Manual rollback skips the build and all database bootstrap commands, pulls the selected historical image from TCR, and switches only API/nginx.
 
 ### Rollback
 
@@ -334,7 +346,7 @@ Application image rollback does not automatically rollback database schema. Prod
 
 - local: run `pdm run migrate` manually.
 - test: use Actions -> Migrate -> Run workflow, or run Alembic manually against test after review.
-- product: use Actions -> Migrate -> Run workflow with product approval, backup confirmation, and a reviewed migration diff.
+- product: use Actions -> Migrate -> Run workflow with backup confirmation and a reviewed migration diff; any organizational approval is outside this workflow design.
 
 The generated Migrate workflow inputs are:
 
@@ -352,11 +364,11 @@ docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic
 docker compose --env-file .env -f docker-compose.deploy.yml run --rm api alembic current
 ```
 
-Deploy and rollback do not run migrations automatically.
+The Migrate workflow remains an independent maintenance tool. Every normal immutable-tag Deploy already runs the fixed current/upgrade/current sequence; historical-image rollback does not invoke Migrate or Alembic.
 
 ### Seed and Permission Synchronization Policy
 
-Product does not auto-run seed or permission synchronization. The Migrate workflow also runs neither operation. `pdm run seed` only creates the default admin identity and role association; it does not create API permissions. Use `pdm run permission-sync --dry-run` to review changes, run `pdm run permission-sync` to apply them under a PostgreSQL advisory lock, then run `pdm run permission-sync --check` to confirm the database matches the deployed route declarations. These remain explicit reviewed deployment steps and are intentionally not part of automatic deploy or rollback workflows.
+Every normal immutable-tag Deploy runs the idempotent seed and permission synchronization dry-run/apply/check after Alembic and before API/nginx startup. `pdm run seed` only creates or reuses the configured admin identity, admin role, and role association; it does not reset an existing user's password or create API permissions. Permission synchronization creates or updates the declarations under a PostgreSQL advisory lock. Historical-image rollback runs neither seed nor permission synchronization. `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` are Environment Secrets scoped to the one-shot normal-release command and are excluded from the persistent runtime `.env`.
 
 
 ## Scripts
@@ -374,7 +386,7 @@ pdm run permission-sync --check
 pdm run alembic-current
 ```
 
-`pdm run init -- --timeout 180` forwards the timeout option to the initialization script. `init` is for local Docker development only; deployment migrations, admin Seed, and permission synchronization remain explicit reviewed steps.
+`pdm run init -- --timeout 180` forwards the timeout option to the local initialization script. Before the first run, copy `.env.local.example` to `.env`, replace both `CHANGE_ME` values, and keep the file mode at `0600`. Deployment uses the separate manual infrastructure Init workflow and performs migration, seed, and permission synchronization automatically only for normal immutable-tag releases.
 
 ## Project Structure
 

@@ -25,7 +25,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from redis import Redis
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -240,6 +241,8 @@ def _runtime_env(database_url: str, redis_url: str, redis_prefix: str) -> dict[s
             "DOCS_ENABLED": "false",
             "REDOC_ENABLED": "false",
             "WEB_CONCURRENCY": "1",
+            "SEED_ADMIN_EMAIL": "role-phase5-admin@example.com",
+            "SEED_ADMIN_PASSWORD": "role-phase5-test-password",
         }
     )
     return env
@@ -334,9 +337,9 @@ def run_migration_validation(config: RolePhase5Config) -> dict[str, Any]:
             columns = {column["name"]: column for column in inspector.get_columns("roles")}
             indexes = {index["name"]: index for index in inspector.get_indexes("roles")}
             _assert(set(columns) == expected_columns, "roles table columns do not match the model")
-            for column_name in {"id", "name", "description", "is_enabled", "created_at", "updated_at", "version"}:
+            for column_name in ("id", "name", "description", "is_enabled", "created_at", "updated_at", "version"):
                 _assert(columns[column_name]["nullable"] is False, f"{column_name} must be NOT NULL")
-            for column_name in {"disabled_at", "disabled_reason"}:
+            for column_name in ("disabled_at", "disabled_reason"):
                 _assert(columns[column_name]["nullable"] is True, f"{column_name} must be nullable")
             _assert({"ix_roles_id", "ix_roles_name", "ix_roles_is_enabled"} <= set(indexes), "roles indexes are incomplete")
             _assert(indexes["ix_roles_name"]["unique"] is True, "role name index is not unique")
@@ -992,7 +995,7 @@ def _run_http_role_flow(
         logins[name] = login
         sensitive_values.update((str(login["access_token"]), str(login["refresh_token"]), _token_sid(login)))
 
-    admin_login = _login(client, "admin@example.com", "password123", env)
+    admin_login = _login(client, env["SEED_ADMIN_EMAIL"], env["SEED_ADMIN_PASSWORD"], env)
     admin_claims = admin_login["verified_claims"]
     _assert(set(ROLE_PERMISSIONS) <= set(str(admin_claims["scope"]).split()), "admin token is missing role permissions")
     sensitive_values.update(
@@ -1000,7 +1003,7 @@ def _run_http_role_flow(
             str(admin_login["access_token"]),
             str(admin_login["refresh_token"]),
             _token_sid(admin_login),
-            "password123",
+            env["SEED_ADMIN_PASSWORD"],
         )
     )
 
@@ -1555,7 +1558,7 @@ def run_http_validation(config: RolePhase5Config) -> dict[str, Any]:
             env["JWT_PRIVATE_KEY"],
             env["JWT_PUBLIC_KEY"],
             str(fixtures["password"]),
-            "password123",
+            env["SEED_ADMIN_PASSWORD"],
         }
         flow_error: Exception | None = None
         try:
