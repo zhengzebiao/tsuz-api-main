@@ -192,6 +192,7 @@ ccr.ccs.tencentyun.com/tsuz/tsuz-api-main-product
 | `DOCKER_IMAGE_NAME` | 完整 TCR 镜像路径，例如 `ccr.ccs.tencentyun.com/tsuz/tsuz-api-main-test` |
 | `DOCKER_REGISTRY_USERNAME` | TCR 用户名；个人版通常为腾讯云账号 ID |
 | `DOCKER_BUILD_PLATFORM` | 构建平台，当前服务器推荐 `linux/amd64` |
+| `COMPOSE_PROJECT_NAME` | Init 和 Deploy 共用的显式 Docker Compose 项目名称 |
 | `DOCKER_NETWORK_NAME` | Docker 外部网络名称 |
 | `APP_ENV` | 应用环境名称 |
 | `JWT_ISSUER` | JWT issuer |

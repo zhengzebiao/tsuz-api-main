@@ -37,6 +37,12 @@ def test_init_workflow_is_independent_and_non_destructive() -> None:
     assert "INITIALIZE-test" in workflow
     assert "INITIALIZE-product" in workflow
     assert "POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}" in workflow
+    assert "COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}" in workflow
+    assert ': "${COMPOSE_PROJECT_NAME:?Missing COMPOSE_PROJECT_NAME environment variable}"' in workflow
+    assert '[[ ! "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]' in workflow
+    assert 'printf \'COMPOSE_PROJECT_NAME=%q\\n\' "$COMPOSE_PROJECT_NAME"' in workflow
+    assert 'compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env.infra -f docker-compose.infra.yml)' in workflow
+    assert '"${compose[@]}" up -d postgres redis' in workflow
     assert "docker network inspect" in workflow
     assert "up -d postgres redis" in workflow
     assert "pg_isready" in workflow

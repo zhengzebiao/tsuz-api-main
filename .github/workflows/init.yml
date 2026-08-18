@@ -35,6 +35,7 @@ jobs:
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
       DOCKER_NETWORK_NAME: ${{ vars.DOCKER_NETWORK_NAME }}
       POSTGRES_CONTAINER_NAME: ${{ vars.POSTGRES_CONTAINER_NAME }}
       POSTGRES_DB: ${{ vars.POSTGRES_DB }}
@@ -59,7 +60,12 @@ jobs:
           : "${DEPLOY_HOST:?Missing DEPLOY_HOST environment variable}"
           : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
           : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
+          : "${COMPOSE_PROJECT_NAME:?Missing COMPOSE_PROJECT_NAME environment variable}"
           : "${DOCKER_NETWORK_NAME:?Missing DOCKER_NETWORK_NAME environment variable}"
+          if [[ ! "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            echo "Invalid COMPOSE_PROJECT_NAME: $COMPOSE_PROJECT_NAME" >&2
+            exit 1
+          fi
           : "${POSTGRES_CONTAINER_NAME:?Missing POSTGRES_CONTAINER_NAME environment variable}"
           : "${POSTGRES_DB:?Missing POSTGRES_DB environment variable}"
           : "${POSTGRES_USER:?Missing POSTGRES_USER environment variable}"
@@ -120,6 +126,7 @@ jobs:
           from pathlib import Path
 
           keys = (
+              "COMPOSE_PROJECT_NAME",
               "DOCKER_NETWORK_NAME",
               "POSTGRES_CONTAINER_NAME",
               "POSTGRES_DB",
@@ -160,6 +167,7 @@ jobs:
             exit 1
           fi
           {
+            printf 'COMPOSE_PROJECT_NAME=%q\n' "$COMPOSE_PROJECT_NAME"
             printf 'DOCKER_NETWORK_NAME=%q\n' "$DOCKER_NETWORK_NAME"
             printf 'POSTGRES_CONTAINER_NAME=%q\n' "$POSTGRES_CONTAINER_NAME"
             printf 'POSTGRES_USER=%q\n' "$POSTGRES_USER"
@@ -172,8 +180,9 @@ jobs:
           command -v docker >/dev/null 2>&1 || { echo "docker is required on the deployment server." >&2; exit 1; }
           docker compose version >/dev/null
           docker network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1 || docker network create "$DOCKER_NETWORK_NAME"
-          docker compose --env-file .env.infra -f docker-compose.infra.yml config --quiet
-          docker compose --env-file .env.infra -f docker-compose.infra.yml up -d postgres redis
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env.infra -f docker-compose.infra.yml)
+          "${compose[@]}" config --quiet
+          "${compose[@]}" up -d postgres redis
 
           for attempt in $(seq 1 "$INIT_HEALTH_RETRIES"); do
             postgres_ready=false
@@ -185,15 +194,15 @@ jobs:
               redis_ready=true
             fi
             if [ "$postgres_ready" = "true" ] && [ "$redis_ready" = "true" ]; then
-              docker compose --env-file .env.infra -f docker-compose.infra.yml ps postgres redis
+              "${compose[@]}" ps postgres redis
               exit 0
             fi
             echo "Waiting for PostgreSQL and Redis ($attempt/$INIT_HEALTH_RETRIES)."
             sleep "$INIT_HEALTH_INTERVAL_SECONDS"
           done
           echo "Infrastructure did not become ready." >&2
-          docker compose --env-file .env.infra -f docker-compose.infra.yml ps postgres redis
-          docker compose --env-file .env.infra -f docker-compose.infra.yml logs --tail=100 postgres redis
+          "${compose[@]}" ps postgres redis
+          "${compose[@]}" logs --tail=100 postgres redis
           exit 1
           REMOTE_INIT
           } | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \

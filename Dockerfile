@@ -6,8 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     PDM_VENV_IN_PROJECT=1  
 
 RUN pip install --no-cache-dir pdm
 
-COPY pyproject.toml ./
-RUN pdm install --prod --no-self
+COPY pyproject.toml pdm.lock ./
+RUN pdm install --prod --no-self --frozen-lockfile
 
 COPY . .
 
