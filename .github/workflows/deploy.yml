@@ -519,14 +519,26 @@ jobs:
           set -euo pipefail
           export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
           compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env -f docker-compose.deploy.yml)
-          "${compose[@]}" run --rm --no-deps api alembic current
-          "${compose[@]}" run --rm --no-deps api alembic upgrade head
-          "${compose[@]}" run --rm --no-deps api alembic current
-          "${compose[@]}" run --rm --no-deps -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD api python -m app.seed
+          compose_run() {
+            "${compose[@]}" run --rm --no-deps -T "$@" </dev/null
+          }
+
+          echo "Running Alembic current before upgrade."
+          compose_run api alembic current
+          echo "Running Alembic upgrade head."
+          compose_run api alembic upgrade head
+          echo "Running Alembic current after upgrade."
+          compose_run api alembic current
+          echo "Running seed."
+          compose_run -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD api python -m app.seed
           unset SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
-          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions --dry-run
-          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions
-          "${compose[@]}" run --rm --no-deps api python -m app.commands.sync_permissions --check
+          echo "Running permission synchronization dry-run."
+          compose_run api python -m app.commands.sync_permissions --dry-run
+          echo "Applying permission synchronization."
+          compose_run api python -m app.commands.sync_permissions
+          echo "Checking permission synchronization."
+          compose_run api python -m app.commands.sync_permissions --check
+          echo "Database bootstrap completed."
           REMOTE_BOOTSTRAP
           } | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
             "cd '$DEPLOY_PATH' && bash -s"

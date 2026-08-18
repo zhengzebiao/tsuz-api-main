@@ -93,6 +93,8 @@ def test_normal_deploy_bootstrap_is_ordered_and_excludes_rollback() -> None:
     assert "SEED_ADMIN_PASSWORD=" not in workflow[workflow.index("cat > .env.deploy.generated") : bootstrap_start]
     assert "printf 'SEED_ADMIN_EMAIL=%q\\n'" in bootstrap
     assert "printf 'SEED_ADMIN_PASSWORD=%q\\n'" in bootstrap
+    assert '"${compose[@]}" run --rm --no-deps -T "$@" </dev/null' in bootstrap
+    assert 'echo "Database bootstrap completed."' in bootstrap
     assert ".env.seed" not in workflow
     assert "alembic" not in rollback
     assert "app.seed" not in rollback
