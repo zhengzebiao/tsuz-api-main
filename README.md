@@ -207,7 +207,7 @@ Recommended Variables:
 | `DEPLOY_REPO_PATH` | Dedicated absolute source checkout directory on the deployment server |
 | `DOCKER_BUILD_PLATFORM` | Target image platform, normally `linux/amd64` |
 | `CONTAINER_NAME` / `APP_PORT` / `NGINX_PORT` | Runtime container and port settings |
-| `APP_ENV` / `DOCKER_NETWORK_NAME` | Deployment environment and shared Docker network |
+| `APP_ENV` / `COMPOSE_PROJECT_NAME` / `DOCKER_NETWORK_NAME` | Deployment environment, explicit Compose project name, and shared Docker network |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | Token issuer and audience expected by the service |
 | `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins |
 

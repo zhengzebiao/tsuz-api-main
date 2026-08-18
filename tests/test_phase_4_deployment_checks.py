@@ -93,6 +93,28 @@ def test_normal_deploy_bootstrap_is_ordered_and_excludes_rollback() -> None:
     assert "sync_permissions" not in rollback
 
 
+def test_deploy_workflow_uses_explicit_compose_project_name() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+
+    assert "COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}" in workflow
+    assert ': "${COMPOSE_PROJECT_NAME:?Missing COMPOSE_PROJECT_NAME environment variable}"' in workflow
+    assert '[[ ! "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]' in workflow
+
+    compose_commands = [
+        line
+        for line in workflow.splitlines()
+        if "docker compose" in line and "- name:" not in line
+    ]
+    assert compose_commands
+    assert all(
+        'docker compose -p "$COMPOSE_PROJECT_NAME"' in line
+        or "docker compose -p '$COMPOSE_PROJECT_NAME'" in line
+        for line in compose_commands
+    )
+    assert 'printf \'COMPOSE_PROJECT_NAME=%q\\n\' "$COMPOSE_PROJECT_NAME"' in workflow
+    assert "$compose pull api && $compose up -d --no-build api nginx" in workflow
+
+
 def test_deploy_workflow_writes_isolated_email_namespaces() -> None:
     workflow = _read(DEPLOY_WORKFLOW)
 

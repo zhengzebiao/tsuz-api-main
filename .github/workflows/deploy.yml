@@ -297,6 +297,7 @@ jobs:
       IMAGE_TAG: ${{ needs.resolve-deploy.outputs.image_tag }}
       SHOULD_BUILD: ${{ needs.resolve-deploy.outputs.should_build }}
       DEPLOY_ENV: ${{ needs.resolve-deploy.outputs.environment }}
+      COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
       DOCKER_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
       DOCKER_IMAGE_NAME: ${{ vars.DOCKER_IMAGE_NAME }}
       DOCKER_REGISTRY_USERNAME: ${{ vars.DOCKER_REGISTRY_USERNAME }}
@@ -378,7 +379,12 @@ jobs:
           : "${DEPLOY_HOST:?Missing DEPLOY_HOST environment variable}"
           : "${DEPLOY_USER:?Missing DEPLOY_USER environment variable}"
           : "${DEPLOY_PATH:?Missing DEPLOY_PATH environment variable}"
+          : "${COMPOSE_PROJECT_NAME:?Missing COMPOSE_PROJECT_NAME environment variable}"
           : "${SSH_PRIVATE_KEY:?Missing SSH_PRIVATE_KEY secret}"
+          if [[ ! "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            echo "Invalid COMPOSE_PROJECT_NAME: $COMPOSE_PROJECT_NAME" >&2
+            exit 1
+          fi
           if ! [[ "${DEPLOY_PORT:-22}" =~ ^[0-9]+$ ]] || [ "${DEPLOY_PORT:-22}" -lt 1 ] || [ "${DEPLOY_PORT:-22}" -gt 65535 ]; then
             echo "DEPLOY_PORT must be between 1 and 65535." >&2
             exit 1
@@ -506,12 +512,13 @@ jobs:
             exit 1
           fi
           {
+            printf 'COMPOSE_PROJECT_NAME=%q\n' "$COMPOSE_PROJECT_NAME"
             printf 'SEED_ADMIN_EMAIL=%q\n' "$SEED_ADMIN_EMAIL"
             printf 'SEED_ADMIN_PASSWORD=%q\n' "$SEED_ADMIN_PASSWORD"
             cat <<'REMOTE_BOOTSTRAP'
           set -euo pipefail
           export SEED_ADMIN_EMAIL SEED_ADMIN_PASSWORD
-          compose=(docker compose --env-file .env -f docker-compose.deploy.yml)
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env -f docker-compose.deploy.yml)
           "${compose[@]}" run --rm --no-deps api alembic current
           "${compose[@]}" run --rm --no-deps api alembic upgrade head
           "${compose[@]}" run --rm --no-deps api alembic current
@@ -530,16 +537,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          compose="docker compose -p '$COMPOSE_PROJECT_NAME' --env-file .env -f docker-compose.deploy.yml"
           if [ "$SHOULD_BUILD" = "true" ]; then
             ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "docker image inspect '$IMAGE_NAME:$IMAGE_TAG' >/dev/null && cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml up -d --no-build api nginx"
+              "docker image inspect '$IMAGE_NAME:$IMAGE_TAG' >/dev/null && cd '$DEPLOY_PATH' && $compose up -d --no-build api nginx"
           else
             : "${DOCKER_REGISTRY_TOKEN:?Missing DOCKER_REGISTRY_TOKEN secret for rollback}"
             username="${DOCKER_REGISTRY_USERNAME:?Missing DOCKER_REGISTRY_USERNAME environment variable}"
             printf '%s' "$DOCKER_REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "docker login '$REGISTRY' -u '$username' --password-stdin"
             ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml pull api && docker compose --env-file .env -f docker-compose.deploy.yml up -d --no-build api nginx"
+              "cd '$DEPLOY_PATH' && $compose pull api && $compose up -d --no-build api nginx"
           fi
       - name: Wait for API container health
         shell: bash
@@ -555,12 +563,17 @@ jobs:
             echo "DEPLOY_HEALTH_INTERVAL_SECONDS must be a positive integer." >&2
             exit 1
           fi
-          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && DEPLOY_HEALTH_RETRIES='$retries' DEPLOY_HEALTH_INTERVAL_SECONDS='$interval' bash -s" <<'REMOTE_HEALTH'
+          {
+            printf 'COMPOSE_PROJECT_NAME=%q\n' "$COMPOSE_PROJECT_NAME"
+            printf 'DEPLOY_HEALTH_RETRIES=%q\n' "$retries"
+            printf 'DEPLOY_HEALTH_INTERVAL_SECONDS=%q\n' "$interval"
+            cat <<'REMOTE_HEALTH'
           set -euo pipefail
-          container_id="$(docker compose --env-file .env -f docker-compose.deploy.yml ps -q api)"
+          compose=(docker compose -p "$COMPOSE_PROJECT_NAME" --env-file .env -f docker-compose.deploy.yml)
+          container_id="$("${compose[@]}" ps -q api)"
           if [ -z "$container_id" ]; then
             echo "Unable to resolve api container id." >&2
-            docker compose --env-file .env -f docker-compose.deploy.yml ps
+            "${compose[@]}" ps
             exit 1
           fi
           for attempt in $(seq 1 "$DEPLOY_HEALTH_RETRIES"); do
@@ -573,16 +586,18 @@ jobs:
             sleep "$DEPLOY_HEALTH_INTERVAL_SECONDS"
           done
           echo "api container did not become healthy." >&2
-          docker compose --env-file .env -f docker-compose.deploy.yml ps
-          docker compose --env-file .env -f docker-compose.deploy.yml logs --tail=100 api nginx
+          "${compose[@]}" ps
+          "${compose[@]}" logs --tail=100 api nginx
           exit 1
           REMOTE_HEALTH
+          } | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && bash -s"
       - name: Run deployment smoke test
         shell: bash
         run: |
           set -euo pipefail
           request_id="deploy-$GITHUB_RUN_ID-$IMAGE_TAG"
-          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose --env-file .env -f docker-compose.deploy.yml exec -T -e DEPLOY_SMOKE_REQUEST_ID='$request_id' api python -" <<'PY'
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && docker compose -p '$COMPOSE_PROJECT_NAME' --env-file .env -f docker-compose.deploy.yml exec -T -e DEPLOY_SMOKE_REQUEST_ID='$request_id' api python -" <<'PY'
           import json
           import os
           import urllib.error
