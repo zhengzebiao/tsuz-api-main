@@ -199,8 +199,13 @@ ccr.ccs.tencentyun.com/tsuz/tsuz-api-main-product
 | `JWT_AUDIENCE` | JWT audience |
 | `CORS_ALLOW_ORIGINS` | 允许的跨域来源 |
 | `DEPLOY_PUBLIC_HEALTH_URL` | 公网健康检查地址 |
+| `OPENAPI_ENABLED` | 是否启用 OpenAPI schema，默认 `false` |
+| `DOCS_ENABLED` | 是否启用 Swagger UI 文档，默认 `false` |
+| `REDOC_ENABLED` | 是否启用 ReDoc 文档，默认 `false` |
 
 Init 还使用 `POSTGRES_CONTAINER_NAME`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PORT`、`REDIS_CONTAINER_NAME`、`REDIS_PORT`、`INIT_HEALTH_RETRIES` 和 `INIT_HEALTH_INTERVAL_SECONDS` Environment Variables。
+
+`OPENAPI_ENABLED`、`DOCS_ENABLED` 和 `REDOC_ENABLED` 由各 GitHub Environment 的 Variables 注入 Deploy。未配置时 Deploy 默认写入 `false`；生产环境建议保持关闭，测试环境如需调试可单独设置为 `true`。
 
 变量和 Secret 的现有读取逻辑可参考：
 

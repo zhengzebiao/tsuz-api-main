@@ -343,6 +343,9 @@ jobs:
       EMAIL_SEND_LIMIT_PER_HOUR: ${{ vars.EMAIL_SEND_LIMIT_PER_HOUR }}
       EMAIL_IP_SEND_LIMIT_PER_MINUTE: ${{ vars.EMAIL_IP_SEND_LIMIT_PER_MINUTE }}
       TRUSTED_PROXY_IPS: ${{ vars.TRUSTED_PROXY_IPS }}
+      OPENAPI_ENABLED: ${{ vars.OPENAPI_ENABLED }}
+      DOCS_ENABLED: ${{ vars.DOCS_ENABLED }}
+      REDOC_ENABLED: ${{ vars.REDOC_ENABLED }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -472,9 +475,9 @@ jobs:
           TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-127.0.0.1,::1}
           CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-https://app.example.com}
           CORS_ALLOW_CREDENTIALS=true
-          OPENAPI_ENABLED=false
-          DOCS_ENABLED=false
-          REDOC_ENABLED=false
+          OPENAPI_ENABLED=${OPENAPI_ENABLED:-false}
+          DOCS_ENABLED=${DOCS_ENABLED:-false}
+          REDOC_ENABLED=${REDOC_ENABLED:-false}
           ENV
           ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/nginx'"
           scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" docker-compose.deploy.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.deploy.yml"

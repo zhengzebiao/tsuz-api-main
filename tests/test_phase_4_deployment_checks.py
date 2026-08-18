@@ -132,6 +132,14 @@ def test_deploy_workflow_writes_isolated_email_namespaces() -> None:
     assert "TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-127.0.0.1,::1}" in workflow
 
 
+def test_deploy_workflow_uses_environment_documentation_flags() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+
+    for variable in ("OPENAPI_ENABLED", "DOCS_ENABLED", "REDOC_ENABLED"):
+        assert f"{variable}: ${{{{ vars.{variable} }}}}" in workflow
+        assert f"{variable}=${{{variable}:-false}}" in workflow
+
+
 def test_deployment_migration_requires_explicit_forward_revision_and_backup() -> None:
     workflow = _read(MIGRATE_WORKFLOW)
 
