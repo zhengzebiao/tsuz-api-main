@@ -373,10 +373,10 @@ def run_migration_validation(config: AppPhase5Config) -> dict[str, Any]:
 
         _alembic(database.url, "upgrade", "head")
         current_output = _alembic(database.url, "current")
-        _assert("0006_email_registration" in current_output, "database did not return to App migration head")
+        _assert("0007_qq_login" in current_output, "database did not return to App migration head")
         return {
             "database": database.name,
-            "current_revision": "0006_email_registration",
+            "current_revision": "0007_qq_login",
             "alembic_check": "clean",
             "legacy_user_preserved": True,
             "app_columns_verified": 14,

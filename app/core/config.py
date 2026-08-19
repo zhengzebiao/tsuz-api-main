@@ -1,8 +1,14 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     app_env: str = "test"
     debug: bool = True
@@ -16,6 +22,20 @@ class Settings(BaseSettings):
     db_sslmode: str = "disable"
     redis_url: str = "redis://localhost:6379/0"
     redis_key_prefix: str = "auth:test:"
+
+    app_id: str = Field(default="", validation_alias="APP_ID")
+    app_key: str = Field(default="", validation_alias="APP_KEY")
+    qq_redirect_uri: str = ""
+    qq_ticket_redirect_uri: str = ""
+    qq_authorize_url: str = "https://graph.qq.com/oauth2.0/authorize"
+    qq_token_url: str = "https://graph.qq.com/oauth2.0/token"
+    qq_openid_url: str = "https://graph.qq.com/oauth2.0/me"
+    qq_user_info_url: str = "https://graph.qq.com/user/get_user_info"
+    qq_state_prefix: str = "auth:test:qq:state:"
+    qq_ticket_prefix: str = "auth:test:qq:ticket:"
+    qq_state_ttl_seconds: int = 300
+    qq_ticket_ttl_seconds: int = 60
+    qq_http_timeout_seconds: int = 10
 
     jwt_algorithm: str = "RS256"
     jwt_issuer: str = "auth-service-test"

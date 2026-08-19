@@ -36,7 +36,7 @@ if str(ROOT_DIR) not in sys.path:
 DEFAULT_ADMIN_DATABASE_URL = "postgresql+psycopg://test_user:test_password@127.0.0.1:55432/postgres"
 DEFAULT_REDIS_URL = "redis://127.0.0.1:56379/15"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
-HEAD_REVISION = "0006_email_registration"
+HEAD_REVISION = "0007_qq_login"
 ROLE_PERMISSIONS = (
     "role:read",
     "role:assign_permissions",

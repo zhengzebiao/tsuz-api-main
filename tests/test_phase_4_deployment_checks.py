@@ -15,6 +15,51 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_deploy_workflow_injects_qq_secrets_without_logging_them() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+
+    assert "APP_ID: ${{ secrets.APP_ID }}" in workflow
+    assert "APP_KEY: ${{ secrets.APP_KEY }}" in workflow
+    assert ': "${APP_ID:?Missing APP_ID secret}"' in workflow
+    assert ': "${APP_KEY:?Missing APP_KEY secret}"' in workflow
+    assert "APP_ID=$APP_ID" in workflow
+    assert "APP_KEY=$APP_KEY" in workflow
+    assert ': "${QQ_REDIRECT_URI:?Missing QQ_REDIRECT_URI environment variable}"' in workflow
+    assert ': "${QQ_TICKET_REDIRECT_URI:?Missing QQ_TICKET_REDIRECT_URI environment variable}"' in workflow
+    assert "QQ_REDIRECT_URI=$QQ_REDIRECT_URI" in workflow
+    assert "QQ_TICKET_REDIRECT_URI=$QQ_TICKET_REDIRECT_URI" in workflow
+    assert 'echo "$APP_ID"' not in workflow
+    assert 'echo "$APP_KEY"' not in workflow
+
+
+def test_deploy_workflow_writes_qq_environment_variables() -> None:
+    workflow = _read(DEPLOY_WORKFLOW)
+
+    variables = (
+        "QQ_REDIRECT_URI",
+        "QQ_TICKET_REDIRECT_URI",
+        "QQ_AUTHORIZE_URL",
+        "QQ_TOKEN_URL",
+        "QQ_OPENID_URL",
+        "QQ_USER_INFO_URL",
+        "QQ_STATE_PREFIX",
+        "QQ_TICKET_PREFIX",
+        "QQ_STATE_TTL_SECONDS",
+        "QQ_TICKET_TTL_SECONDS",
+        "QQ_HTTP_TIMEOUT_SECONDS",
+    )
+    for variable in variables:
+        assert f"{variable}: ${{{{ vars.{variable} }}}}" in workflow
+
+    for variable in variables[2:]:
+        assert f"{variable}=${{{variable}:-" in workflow
+
+    assert "QQ_REDIRECT_URI=$QQ_REDIRECT_URI" in workflow
+    assert "QQ_TICKET_REDIRECT_URI=$QQ_TICKET_REDIRECT_URI" in workflow
+    assert "QQ_STATE_PREFIX=${QQ_STATE_PREFIX:-auth:$DEPLOY_ENV:qq:state:}" in workflow
+    assert "QQ_TICKET_PREFIX=${QQ_TICKET_PREFIX:-auth:$DEPLOY_ENV:qq:ticket:}" in workflow
+
+
 def test_deploy_workflow_injects_ses_secrets_without_logging_them() -> None:
     workflow = _read(DEPLOY_WORKFLOW)
 

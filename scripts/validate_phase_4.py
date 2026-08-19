@@ -352,13 +352,13 @@ def run_migration_roundtrip(config: Phase4Config) -> dict[str, Any]:
 
         _alembic(database.url, "upgrade", "head")
         current_output = _alembic(database.url, "current")
-        _assert("0006_email_registration" in current_output, "database did not return to the head revision")
+        _assert("0007_qq_login" in current_output, "database did not return to the head revision")
         return {
             "database": database.name,
             "legacy_user_preserved": True,
             "legacy_session_preserved": True,
             "alembic_check": "clean",
-            "current_revision": "0006_email_registration",
+            "current_revision": "0007_qq_login",
         }
 
 

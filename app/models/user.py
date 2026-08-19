@@ -11,8 +11,8 @@ class User(Base):
     __table_args__ = (Index("ix_users_is_active_is_blacklisted", "is_active", "is_blacklisted"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True, nullable=True)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(128))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())

@@ -31,7 +31,7 @@ def test_permission_phase5_migration_roundtrip(
 ) -> None:
     report = run_migration_validation(permission_phase5_config)
 
-    assert report["current_revision"] == "0006_email_registration"
+    assert report["current_revision"] == "0007_qq_login"
     assert report["alembic_check"] == "clean"
     assert report["permission_columns_verified"] == 12
     assert report["permission_indexes_verified"] == 4

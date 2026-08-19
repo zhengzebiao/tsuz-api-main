@@ -1,10 +1,12 @@
-from collections.abc import Iterator
 import logging
+from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
+import app.services.session_service as session_module
 from app.core.database import Base
 from app.core.security import hash_password
 from app.models.permission import Permission
@@ -65,6 +67,27 @@ class RecordingBlacklistService:
 
     def ensure_not_blacklisted(self, jti: str) -> None:
         self.checked.append(jti)
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.expirations: dict[str, int] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.values[key] = value
+        if ex is not None:
+            self.expirations[key] = ex
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    redis = FakeRedis()
+    monkeypatch.setattr(session_module, "get_redis", lambda: redis)
+    return redis
 
 
 @pytest.fixture
@@ -271,9 +294,11 @@ def test_login_failure_logs_reason_without_password(db_session: DbSession, caplo
     attach_service_fakes(service)
     raw_password = "wrong-password-secret"
 
-    with caplog.at_level(logging.WARNING, logger="app.auth"):
-        with pytest.raises(ValueError, match="invalid credentials"):
-            service.login(LoginRequest(username="admin@example.com", password=raw_password))
+    with (
+        caplog.at_level(logging.WARNING, logger="app.auth"),
+        pytest.raises(ValueError, match="invalid credentials"),
+    ):
+        service.login(LoginRequest(username="admin@example.com", password=raw_password))
 
     assert "reason=invalid_credentials" in caplog.text
     assert "admin@example.com" not in caplog.text
