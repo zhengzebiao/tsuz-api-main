@@ -55,6 +55,10 @@ class RefreshTokenRequest(_StrictModel):
     refresh_token: str
 
 
+class QQTicketExchangeRequest(_StrictModel):
+    ticket: str = Field(min_length=1, max_length=256)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -83,7 +87,20 @@ class LogoutResponse(BaseModel):
     message: str
 
 
+class UserIdentityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    provider: str
+    display_name: str | None = None
+    avatar: str | None = None
+    verified: bool
+
+
 class UserResponse(BaseModel):
     id: str
-    username: str
-    roles: list[str] = []
+    username: str | None
+    roles: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    display_name: str | None = None
+    avatar: str | None = None
+    identities: list[UserIdentityResponse] = Field(default_factory=list)

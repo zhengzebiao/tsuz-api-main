@@ -1,10 +1,18 @@
+# ruff: noqa: B008
+
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
 from app.api.client_ip import get_client_ip
 from app.api.dependencies import require_access_token, security
+from app.core.config import settings
 from app.core.database import get_db
 from app.schemas.auth import (
     EmailChallengeResponse,
@@ -17,17 +25,27 @@ from app.schemas.auth import (
     PasswordForgotCodeResponse,
     PasswordResetRequest,
     PasswordResetResponse,
+    QQTicketExchangeRequest,
     RefreshTokenRequest,
     TokenResponse,
     UserResponse,
 )
 from app.services.auth_service import AuthService
+from app.services.authorization_service import AuthenticationError
 from app.services.email_auth_service import (
     EmailAlreadyRegisteredError,
     EmailAuthConfigurationError,
     EmailAuthService,
     EmailAuthStateError,
     EmailPasswordPolicyError,
+)
+from app.services.qq_oauth_service import (
+    QQOAuthConfigurationError,
+    QQOAuthIdentityError,
+    QQOAuthProviderError,
+    QQOAuthService,
+    QQOAuthStateError,
+    QQOAuthTicketError,
 )
 from app.services.tencent_ses_service import EmailProviderError
 from app.services.verification_challenge_service import (
@@ -48,6 +66,95 @@ def _email_service_unavailable() -> HTTPException:
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="email authentication unavailable",
     )
+
+
+def _qq_service_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="QQ authentication unavailable",
+    )
+
+
+def _qq_error_redirect() -> RedirectResponse:
+    target = _append_query_parameter(settings.qq_ticket_redirect_uri, "qq_error", "oauth_failed")
+    return RedirectResponse(url=target, status_code=status.HTTP_302_FOUND)
+
+
+def _append_query_parameter(url: str, key: str, value: str) -> str:
+    parts = urlsplit(url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    query.append((key, value))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _validate_qq_ticket_redirect_uri() -> None:
+    if not settings.qq_ticket_redirect_uri.strip():
+        raise _qq_service_unavailable()
+
+
+@router.get(
+    "/qq/login",
+    status_code=status.HTTP_302_FOUND,
+    summary="Start QQ OAuth login",
+)
+def qq_login(db: DbSession = Depends(get_db)) -> RedirectResponse:
+    try:
+        return RedirectResponse(
+            url=QQOAuthService(db).build_authorize_url(),
+            status_code=status.HTTP_302_FOUND,
+        )
+    except (QQOAuthConfigurationError, QQOAuthStateError) as exc:
+        raise _qq_service_unavailable() from exc
+
+
+@router.get(
+    "/qq/callback",
+    status_code=status.HTTP_302_FOUND,
+    summary="Complete QQ OAuth login",
+)
+def qq_callback(
+    code: str | None = None,
+    state: str | None = None,
+    db: DbSession = Depends(get_db),
+) -> RedirectResponse:
+    _validate_qq_ticket_redirect_uri()
+    if code is None or state is None:
+        return _qq_error_redirect()
+    try:
+        ticket = QQOAuthService(db).complete_authorization(code, state)
+    except (
+        QQOAuthConfigurationError,
+        QQOAuthStateError,
+        QQOAuthProviderError,
+        QQOAuthIdentityError,
+        QQOAuthTicketError,
+        RedisError,
+        SQLAlchemyError,
+    ):
+        return _qq_error_redirect()
+    return RedirectResponse(
+        url=_append_query_parameter(settings.qq_ticket_redirect_uri, "ticket", ticket),
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.post(
+    "/qq/exchange",
+    response_model=TokenResponse,
+    summary="Exchange a QQ login ticket for tokens",
+    responses={401: {"description": "Invalid QQ ticket"}},
+)
+def qq_exchange(
+    payload: QQTicketExchangeRequest,
+    db: DbSession = Depends(get_db),
+) -> TokenResponse:
+    try:
+        user_id = QQOAuthService(db).consume_ticket(payload.ticket)
+        return AuthService(db).complete_login(user_id)
+    except (QQOAuthConfigurationError, QQOAuthIdentityError, RedisError, SQLAlchemyError) as exc:
+        raise _qq_service_unavailable() from exc
+    except (QQOAuthTicketError, AuthenticationError) as exc:
+        raise _unauthorized("invalid QQ ticket") from exc
 
 
 @router.post(

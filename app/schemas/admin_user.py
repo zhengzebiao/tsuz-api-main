@@ -99,7 +99,7 @@ class AdminUserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    email: EmailStr
+    email: EmailStr | None
     display_name: str | None
     is_active: bool
     is_blacklisted: bool

@@ -9,7 +9,14 @@ from app.models.permission import Permission
 from app.models.role import Role, role_permissions, user_roles
 from app.models.session import Session as AuthSession
 from app.models.user import User
-from app.schemas.auth import LoginRequest, LogoutResponse, TokenResponse, UserResponse
+from app.models.user_identity import UserIdentity
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutResponse,
+    TokenResponse,
+    UserIdentityResponse,
+    UserResponse,
+)
 from app.services.authorization_service import AuthenticationError, ensure_user_can_authenticate
 from app.services.blacklist_service import BlacklistService
 from app.services.refresh_token_service import RefreshTokenReuseError, RefreshTokenService
@@ -37,7 +44,7 @@ class AuthService:
         except AuthenticationError as exc:
             logger.warning("login failed reason=invalid_credentials")
             raise ValueError("invalid credentials") from exc
-        if not verify_password(password, user.hashed_password):
+        if user.hashed_password is None or not verify_password(password, user.hashed_password):
             logger.warning("login failed reason=invalid_credentials")
             raise ValueError("invalid credentials")
 
@@ -96,7 +103,7 @@ class AuthService:
         sid = self._required_string_claim(payload, "sid")
         exp = payload.get("exp")
         if not isinstance(exp, int):
-            raise ValueError("invalid access token")
+            raise ValueError("invalid access token")  # noqa: TRY004
         self.blacklist.add_jti(jti, exp)
         self.sessions.revoke_session(sid, reason="user_logout")
         self.db.commit()
@@ -111,8 +118,26 @@ class AuthService:
         self.blacklist.ensure_not_blacklisted(jti)
         self.sessions.ensure_session_active(sid)
         user = self._get_authenticatable_user_by_id(user_id)
-        roles, _scope = self._build_claims(user)
-        return UserResponse(id=str(user.id), username=user.email, roles=roles)
+        roles, scope = self._build_claims(user)
+        permissions = scope.split() if scope else []
+        identities = list(
+            self.db.scalars(
+                select(UserIdentity)
+                .where(UserIdentity.user_id == user.id)
+                .order_by(UserIdentity.provider, UserIdentity.id)
+            ).all()
+        )
+        identity_responses = [UserIdentityResponse.model_validate(identity) for identity in identities]
+        primary_identity = identities[0] if identities else None
+        return UserResponse(
+            id=str(user.id),
+            username=user.email,
+            roles=roles,
+            permissions=permissions,
+            display_name=user.display_name or (primary_identity.display_name if primary_identity else None),
+            avatar=primary_identity.avatar if primary_identity else None,
+            identities=identity_responses,
+        )
 
     def _get_user_by_email(self, email: str) -> User | None:
         return self.db.scalar(select(User).where(User.email == email))

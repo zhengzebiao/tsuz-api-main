@@ -4,7 +4,8 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.session_service as session_module
 from app.core.database import Base
@@ -20,6 +21,7 @@ from app.services.admin_user_service import (
     EmailAlreadyExistsError,
     InvalidPasswordError,
     LastActiveAdminError,
+    PasswordResetUnavailableError,
     SelfOperationNotAllowedError,
     UserBlacklistedError,
     UserNotFoundError,
@@ -339,6 +341,36 @@ def test_reset_password_and_force_logout_audit_without_secrets(db_session: DbSes
     assert force_audit is not None
     assert force_audit.reason == "security review"
     assert force_audit.changes_json == {"revoked_sessions": 0}
+
+
+def test_reset_password_rejects_qq_only_user_without_mutation(db_session: DbSession) -> None:
+    actor = add_user(db_session, "admin@example.com")
+    target = User(email=None, hashed_password=None, is_active=True)
+    db_session.add(target)
+    db_session.flush()
+    add_active_session(db_session, target, "sid-qq-only-reset")
+    db_session.commit()
+    original_version = target.version
+    service = AdminUserService(db_session)
+
+    with pytest.raises(PasswordResetUnavailableError, match="PASSWORD_RESET_UNAVAILABLE"):
+        service.reset_password(
+            target.id,
+            "replacement-password",
+            actor_user_id=actor.id,
+            request_id="req-qq-only-reset",
+        )
+
+    db_session.refresh(target)
+    assert target.hashed_password is None
+    assert target.version == original_version
+    auth_session = db_session.scalar(
+        select(AuthSession).where(AuthSession.sid == "sid-qq-only-reset")
+    )
+    assert auth_session is not None
+    assert auth_session.status == "active"
+    assert auth_session.revoked_at is None
+    assert db_session.scalar(select(AuditEvent).where(AuditEvent.action == "user.password_reset")) is None
 
 
 def test_get_user_roles_returns_all_roles_in_stable_order(db_session: DbSession) -> None:

@@ -13,6 +13,7 @@ from app.models.permission import Permission
 from app.models.role import Role, role_permissions, user_roles
 from app.models.session import Session as AuthSession
 from app.models.user import User
+from app.models.user_identity import UserIdentity
 from app.schemas.auth import LoginRequest
 from app.services.auth_service import AuthService
 from app.services.authorization_service import AuthenticationError
@@ -411,8 +412,19 @@ def test_refresh_reuse_revokes_db_session(db_session: DbSession) -> None:
     assert auth_session.revoked_at is not None
 
 
-def test_current_user_returns_db_email_and_roles(db_session: DbSession) -> None:
+def test_current_user_returns_db_email_roles_permissions_and_identity(db_session: DbSession) -> None:
     user = create_user_with_rbac(db_session)
+    user.display_name = "Local Name"
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="qq",
+            provider_subject="openid-secret",
+            display_name="QQ Name",
+            avatar="https://avatar.example.test/a",
+            verified=True,
+        )
+    )
     db_session.add(AuthSession(sid="sid-current", user_id=user.id, status="active"))
     db_session.commit()
     service = AuthService(db_session)
@@ -424,8 +436,61 @@ def test_current_user_returns_db_email_and_roles(db_session: DbSession) -> None:
     assert response.id == str(user.id)
     assert response.username == "admin@example.com"
     assert response.roles == ["admin"]
+    assert response.permissions == ["user:read", "user:write"]
+    assert response.display_name == "Local Name"
+    assert response.avatar == "https://avatar.example.test/a"
+    assert response.identities[0].model_dump() == {
+        "provider": "qq",
+        "display_name": "QQ Name",
+        "avatar": "https://avatar.example.test/a",
+        "verified": True,
+    }
+    assert "openid-secret" not in str(response.model_dump())
     assert blacklist.checked == ["jti-current"]
     assert refresh_tokens.session_checks == []
+
+
+def test_current_user_returns_qq_only_user_with_null_username(db_session: DbSession) -> None:
+    user = User(email=None, hashed_password=None, display_name=None, is_active=True)
+    role = Role(name="normal")
+    db_session.add_all([user, role])
+    db_session.flush()
+    db_session.execute(user_roles.insert().values(user_id=user.id, role_id=role.id))
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="qq",
+            provider_subject="qq-only-subject",
+            display_name="QQ Only",
+            avatar=None,
+            verified=True,
+        )
+    )
+    db_session.add(AuthSession(sid="sid-qq-only", user_id=user.id, status="active"))
+    db_session.commit()
+    service = AuthService(db_session)
+    token_payload = {"sub": str(user.id), "jti": "jti-qq-only", "sid": "sid-qq-only", "exp": 4_102_444_800}
+    attach_service_fakes(service, token_payload=token_payload)
+
+    response = service.current_user("access")
+
+    assert response.username is None
+    assert response.roles == ["normal"]
+    assert response.permissions == []
+    assert response.display_name == "QQ Only"
+    assert response.identities[0].provider == "qq"
+    assert "qq-only-subject" not in str(response.model_dump())
+
+
+def test_login_rejects_qq_only_user_without_verifying_none_password(db_session: DbSession) -> None:
+    user = User(email="qq-only@example.com", hashed_password=None, is_active=True)
+    db_session.add(user)
+    db_session.commit()
+    service = AuthService(db_session)
+    attach_service_fakes(service)
+
+    with pytest.raises(ValueError, match="invalid credentials"):
+        service.login_by_email("qq-only@example.com", "password123")
 
 
 def test_current_user_excludes_disabled_roles(db_session: DbSession) -> None:

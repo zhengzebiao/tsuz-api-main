@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, or_, select, update
@@ -42,6 +42,10 @@ class InvalidPasswordError(AdminUserError):
 
 class UserBlacklistedError(AdminUserError):
     code = "USER_BLACKLISTED"
+
+
+class PasswordResetUnavailableError(AdminUserError):
+    code = "PASSWORD_RESET_UNAVAILABLE"
 
 
 class SelfOperationNotAllowedError(AdminUserError):
@@ -362,9 +366,10 @@ class AdminUserService:
         request_id: str | None = None,
     ) -> int:
         self._validate_password(new_password)
-        password_hash = hash_password(new_password)
         user = self._lock_user(user_id)
-        user.hashed_password = password_hash
+        if user.email is None:
+            self._abort(PasswordResetUnavailableError(PasswordResetUnavailableError.code))
+        user.hashed_password = hash_password(new_password)
         user.password_changed_at = self._now()
         self._increment_version(user)
         revoked_sessions = self.sessions.revoke_user_sessions(user.id, "password_reset")
@@ -596,7 +601,7 @@ class AdminUserService:
         user.updated_at = self._now()
 
     def _now(self) -> datetime:
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return datetime.now(UTC).replace(tzinfo=None)
 
     def _abort(self, error: AdminUserError) -> None:
         self.db.rollback()

@@ -4,13 +4,15 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.services.session_service as session_module
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.audit_event import AuditEvent
+from app.models.session import Session as AuthSession
 from app.models.user import User
 
 
@@ -100,6 +102,22 @@ def test_list_and_detail_do_not_expose_password(api_context) -> None:
     assert "hashed_password" not in detail_response.json()
 
 
+def test_admin_responses_serialize_qq_only_user_with_null_email(api_context) -> None:
+    client, db, _actor = api_context
+    qq_only = User(email=None, display_name="QQ Only", hashed_password=None, is_active=True)
+    db.add(qq_only)
+    db.commit()
+
+    list_response = client.get("/admin/users", params={"keyword": "qq only"})
+    detail_response = client.get(f"/admin/users/{qq_only.id}")
+
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 1
+    assert list_response.json()["items"][0]["email"] is None
+    assert detail_response.status_code == 200
+    assert detail_response.json()["email"] is None
+
+
 def test_create_user_returns_201_and_rejects_sensitive_fields(api_context) -> None:
     client, _db, _actor = api_context
 
@@ -148,6 +166,36 @@ def test_admin_api_maps_domain_errors(api_context) -> None:
     assert missing.json()["detail"] == "USER_NOT_FOUND"
     assert stale.status_code == 409
     assert stale.json()["detail"] == "USER_VERSION_CONFLICT"
+
+
+def test_qq_only_user_password_reset_returns_409_without_mutation(api_context) -> None:
+    client, db, _actor = api_context
+    target = User(email=None, hashed_password=None, is_active=True)
+    db.add(target)
+    db.flush()
+    db.add(AuthSession(sid="sid-qq-only-api", user_id=target.id, status="active"))
+    db.commit()
+    original_version = target.version
+
+    response = client.post(
+        f"/admin/users/{target.id}/reset-password",
+        json={"new_password": "replacement-password"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "PASSWORD_RESET_UNAVAILABLE"}
+    db.refresh(target)
+    assert target.hashed_password is None
+    assert target.version == original_version
+    auth_session = db.scalar(select(AuthSession).where(AuthSession.sid == "sid-qq-only-api"))
+    assert auth_session is not None
+    assert auth_session.status == "active"
+    assert db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.target_id == target.id,
+            AuditEvent.action == "user.password_reset",
+        )
+    ) is None
 
 
 def test_state_password_and_logout_endpoints_return_expected_shapes(api_context) -> None:
