@@ -17,13 +17,13 @@ dependencies = [
   "passlib[bcrypt]>=1.7.4",
   "bcrypt>=4.0.1,<5.0.0",
   "email-validator>=2.2.0",
-  "tencentcloud-sdk-python>=3.0.0"
+  "tencentcloud-sdk-python>=3.0.0",
+  "httpx>=0.28.1"
 ]
 
 [dependency-groups]
 dev = [
   "pytest>=8.3.4",
-  "httpx>=0.28.1",
   "ruff>=0.8.4"
 ]
 

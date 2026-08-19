@@ -19,13 +19,20 @@ _PEM_KEY_RE = re.compile(r"-----BEGIN [A-Z ]*KEY-----.*?-----END [A-Z ]*KEY-----
 _BEARER_RE = re.compile(r"(?i)Authorization:\s*Bearer\s+[^\s,;]+")
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _APP_SECRET_RE = re.compile(r"\bapp_secret_(?!hash\b)[A-Za-z0-9_-]{16,}\b")
+_OAUTH_FIELD_NAMES = (
+    r"app_key|oauth_code|qq_code|authorization_code|oauth_state|qq_state|state|"
+    r"oauth_ticket|qq_ticket|ticket|openid|qq_openid|oauth_access_token|qq_access_token"
+)
 _FIELD_RE = re.compile(
     r"(?i)\b(password|access_token|refresh_token|app_secret|app_secret_hash|jwt_private_key|jwt_public_key|"
-    r"github_[a-z0-9_]*secret)\s*[=:]\s*([^\s,;]+)"
+    r"github_[a-z0-9_]*secret|APP_KEY|app_key|"
+    + _OAUTH_FIELD_NAMES
+    + r")\s*[=:]\s*([^\s,;]+)"
 )
 _JSON_FIELD_RE = re.compile(
     r'(?i)("(?:password|access_token|refresh_token|app_secret|app_secret_hash|jwt_private_key|jwt_public_key|'
-    r'github_[a-z0-9_]*secret)"\s*:\s*")([^"]+)(")'
+    r'github_[a-z0-9_]*secret|app_key|oauth_code|qq_code|authorization_code|oauth_state|qq_state|state|'
+    r'oauth_ticket|qq_ticket|ticket|openid|qq_openid|oauth_access_token|qq_access_token)"\s*:\s*")([^"\n]+)(")'
 )
 _URL_PASSWORD_RE = re.compile(r"\b((?:postgresql(?:\+psycopg)?|redis)://[^:\s/@]+):[^@\s]+@")
 

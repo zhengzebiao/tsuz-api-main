@@ -2,7 +2,6 @@ import logging
 
 from app.core.logging import redact_sensitive
 
-
 RAW_JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.signature"
 RAW_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
 secret-key-material
@@ -78,3 +77,32 @@ def test_redact_sensitive_handles_app_secrets_and_hashes() -> None:
     assert "[REDACTED_APP_SECRET]" in redacted
     assert "app_secret=[REDACTED]" in redacted
     assert "app_secret_hash=[REDACTED]" in redacted
+
+
+def test_redact_sensitive_handles_oauth_fields_without_overredacting() -> None:
+    message = (
+        "APP_KEY=app-key-value oauth_code:authorization-code qq_state=state-value "
+        "qq_ticket=ticket-value openid=openid-value oauth_access_token=oauth-token "
+        '{"qq_code":"json-code", "state":"json-state", "ticket":"json-ticket", '
+        '"openid":"json-openid", "qq_access_token":"json-token"} '
+        "code=ordinary-code id=ordinary-id"
+    )
+
+    redacted = redact_sensitive(message)
+
+    for sensitive_value in (
+        "app-key-value",
+        "authorization-code",
+        "state-value",
+        "ticket-value",
+        "openid-value",
+        "oauth-token",
+        "json-code",
+        "json-state",
+        "json-ticket",
+        "json-openid",
+        "json-token",
+    ):
+        assert sensitive_value not in redacted
+    assert "code=ordinary-code" in redacted
+    assert "id=ordinary-id" in redacted
