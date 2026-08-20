@@ -21,6 +21,9 @@ from redis import Redis
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
+
 from app.core.security import sha256_text
 from scripts.validate_phase_4 import (
     Phase4Config,
@@ -36,8 +39,6 @@ from scripts.validate_phase_4 import (
     _wait_for_api,
     temporary_postgres_database,
 )
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
 class FakeQQProviderState:
@@ -267,15 +268,32 @@ def run_qq_integration(config: Phase4Config) -> dict[str, Any]:
                         "/auth/qq/callback",
                         params={"code": provider.authorization_code, "state": _state_from_location(disabled_login)},
                     )
-                    _assert("qq_error=oauth_failed" in _redirect(disabled_callback), "disabled user callback was not rejected")
+                    _assert(
+                        disabled_callback.status_code == 302,
+                        f"disabled user callback failed with status {disabled_callback.status_code}",
+                    )
+                    _assert(
+                        "qq_error=oauth_failed" in _redirect(disabled_callback),
+                        "disabled user callback was not rejected",
+                    )
                     with engine.begin() as connection:
-                        connection.execute(text("UPDATE users SET is_active = true, is_blacklisted = true WHERE id = :id"), {"id": user_id})
+                        connection.execute(
+                            text("UPDATE users SET is_active = true, is_blacklisted = true WHERE id = :id"),
+                            {"id": user_id},
+                        )
                     blacklisted_login = _redirect(client.get("/auth/qq/login"))
                     blacklisted_callback = client.get(
                         "/auth/qq/callback",
                         params={"code": provider.authorization_code, "state": _state_from_location(blacklisted_login)},
                     )
-                    _assert("qq_error=oauth_failed" in _redirect(blacklisted_callback), "blacklisted user callback was not rejected")
+                    _assert(
+                        blacklisted_callback.status_code == 302,
+                        f"blacklisted user callback failed with status {blacklisted_callback.status_code}",
+                    )
+                    _assert(
+                        "qq_error=oauth_failed" in _redirect(blacklisted_callback),
+                        "blacklisted user callback was not rejected",
+                    )
                     with engine.begin() as connection:
                         connection.execute(text("UPDATE users SET is_blacklisted = false WHERE id = :id"), {"id": user_id})
 
@@ -287,7 +305,11 @@ def run_qq_integration(config: Phase4Config) -> dict[str, Any]:
                     )
                     _assert("qq_error=oauth_failed" in _redirect(provider_callback), "provider failure was not stable")
                     provider.failure = False
-                    _assert(provider.redirect_uris == [env["QQ_REDIRECT_URI"]], "provider received an unexpected callback URL")
+                    _assert(
+                        provider.redirect_uris
+                        and all(uri == env["QQ_REDIRECT_URI"] for uri in provider.redirect_uris),
+                        "provider received an unexpected callback URL",
+                    )
             finally:
                 engine.dispose()
                 _stop_process(process)
@@ -303,8 +325,13 @@ def run_qq_integration(config: Phase4Config) -> dict[str, Any]:
         server.shutdown()
         server.server_close()
         provider_thread.join(timeout=5)
-        for sensitive in (provider.authorization_code, provider.access_token, provider.openid):
-            _assert(sensitive not in log_text, "QQ provider value appeared in API logs")
+        sensitive_values = {
+            "authorization_code": provider.authorization_code,
+            "access_token": provider.access_token,
+            "openid": provider.openid,
+        }
+        for label, sensitive in sensitive_values.items():
+            _assert(sensitive not in log_text, f"QQ provider {label} appeared in API logs")
 
     return {
         "authorization": True,
@@ -332,7 +359,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         report = run_qq_integration(Phase4Config.from_env())
     except (OSError, ValueError, Phase4ValidationError) as exc:
-        safe_error = _redact(str(exc), _database_secrets(os.getenv("PHASE4_ADMIN_DATABASE_URL", "")))
+        database_url = os.getenv("PHASE4_ADMIN_DATABASE_URL", "")
+        database_secrets = _database_secrets(database_url) if database_url else ()
+        safe_error = _redact(str(exc), database_secrets)
         print(f"[FAIL] QQ phase 4 validation: {safe_error}", file=sys.stderr)
         return 1
     print(f"[PASS] QQ phase 4 validation: {json.dumps(report, sort_keys=True)}")

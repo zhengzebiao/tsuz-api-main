@@ -110,6 +110,36 @@ This template uses PDM with standard `pyproject.toml` metadata.
 - `POST /auth/logout` blacklists the current access token `jti` and revokes the session.
 - `GET /auth/me` returns the current authenticated user.
 
+### QQ OAuth
+
+QQ login uses a fixed, configured callback and a one-time backend ticket:
+
+- `GET /auth/qq/login` starts authorization and creates a short-lived one-time state.
+- `GET /auth/qq/callback` validates the provider response and redirects only to the configured `QQ_TICKET_REDIRECT_URI` with a one-time ticket, or the stable `qq_error=oauth_failed` error.
+- `POST /auth/qq/exchange` consumes the ticket and returns the normal access/refresh token response through the shared authentication service.
+
+`QQ_REDIRECT_URI` is always sent to QQ as the provider callback. Callback and consumer URLs are never derived from the request host or user-provided redirect parameters. State and ticket Redis keys contain only SHA-256-derived values; their values contain no plaintext OAuth credentials, provider tokens, openid, complete profile, or local tokens. State and ticket TTLs are configured by `QQ_STATE_TTL_SECONDS` and `QQ_TICKET_TTL_SECONDS`.
+
+A QQ-only user has no email/password and therefore returns `username: null` from `/auth/me`; the safe identity response exposes provider metadata but not the provider subject/openid. The `normal` role must be enabled before a new QQ-only user can be created. Migration `0007_qq_login` protects downgrade while QQ-only users with nullable credentials exist.
+
+The isolated fake-provider acceptance can be run without external QQ resources:
+
+```bash
+RUN_PHASE4_QQ_INTEGRATION=1 pdm run phase4-qq-validate
+RUN_QQ_LOGIN_MIGRATION=1 pdm run pytest tests/test_qq_login_migration.py -q
+```
+
+Real QQ test-app acceptance is separately gated and must use a test/staging or loopback API only:
+
+```bash
+RUN_PHASE4_REAL_QQ=1 \
+APP_ENV=test \
+PHASE4_REAL_QQ_API_BASE_URL='<test-api-url>' \
+pdm run phase4-qq-real-validate
+```
+
+The real helper opens the provider authorization flow, waits for manual test-app authorization, accepts the one-time ticket through hidden input, and immediately calls `/auth/qq/exchange`; it does not require a consumer frontend page. Do not place QQ credentials, tickets, authorization codes, tokens, or complete callback URLs in source, logs, documentation, or command history. Real QQ is not considered passed unless the test authorization and fixed callback are actually completed.
+
 ## JWT Configuration
 
 - `python-main` owns `JWT_PRIVATE_KEY`; `python-app` should only receive `JWT_PUBLIC_KEY`.

@@ -130,6 +130,7 @@ def qq_callback(
         QQOAuthTicketError,
         RedisError,
         SQLAlchemyError,
+        AuthenticationError,
     ):
         return _qq_error_redirect()
     return RedirectResponse(

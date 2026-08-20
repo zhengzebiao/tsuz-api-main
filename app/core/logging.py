@@ -35,6 +35,10 @@ _JSON_FIELD_RE = re.compile(
     r'oauth_ticket|qq_ticket|ticket|openid|qq_openid|oauth_access_token|qq_access_token)"\s*:\s*")([^"\n]+)(")'
 )
 _URL_PASSWORD_RE = re.compile(r"\b((?:postgresql(?:\+psycopg)?|redis)://[^:\s/@]+):[^@\s]+@")
+_URL_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:code|oauth_code|qq_code|authorization_code|state|oauth_state|qq_state|"
+    r"ticket|oauth_ticket|qq_ticket|openid|qq_openid|oauth_access_token|qq_access_token)=)[^&#\s]+"
+)
 
 
 def redact_sensitive(value: object) -> object:
@@ -46,6 +50,7 @@ def redact_sensitive(value: object) -> object:
     redacted = _APP_SECRET_RE.sub("[REDACTED_APP_SECRET]", redacted)
     redacted = _JSON_FIELD_RE.sub(r"\1[REDACTED]\3", redacted)
     redacted = _FIELD_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
+    redacted = _URL_QUERY_SECRET_RE.sub(r"\1[REDACTED]", redacted)
     redacted = _URL_PASSWORD_RE.sub(r"\1:[REDACTED]@", redacted)
     return redacted
 
