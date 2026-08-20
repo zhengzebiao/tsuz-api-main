@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
 import logging
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -98,12 +98,14 @@ def test_rotated_refresh_token_after_grace_revokes_session(fake_redis: FakeRedis
     refresh_token = service.create_refresh_token(user_id="user_123", sid="sid_123")
     service.rotate_refresh_token(refresh_token)
     fake_redis.hashes[refresh_key(refresh_token)]["rotated_at"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=settings.refresh_token_reuse_grace_seconds + 1)
+        datetime.now(UTC) - timedelta(seconds=settings.refresh_token_reuse_grace_seconds + 1)
     ).isoformat()
 
-    with caplog.at_level(logging.WARNING, logger="app.auth.refresh"):
-        with pytest.raises(RefreshTokenReuseError, match="reuse detected"):
-            service.rotate_refresh_token(refresh_token)
+    with caplog.at_level(logging.WARNING, logger="app.auth.refresh"), pytest.raises(
+        RefreshTokenReuseError,
+        match="reuse detected",
+    ):
+        service.rotate_refresh_token(refresh_token)
 
     assert fake_redis.get(session_key("sid_123")) == "revoked"
     assert "refresh reuse detected" in caplog.text

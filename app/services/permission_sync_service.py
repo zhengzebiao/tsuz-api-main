@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, select, text
@@ -420,7 +420,7 @@ class PermissionSyncService:
             )
 
     def _now(self) -> datetime:
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _bindings_by_permission(

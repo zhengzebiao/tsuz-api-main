@@ -1,8 +1,7 @@
 import pytest
 
 import app.api.auth as auth_api
-from app.schemas.auth import LoginRequest
-from app.schemas.auth import LogoutResponse, TokenResponse, UserResponse
+from app.schemas.auth import LoginRequest, LogoutResponse, TokenResponse, UserResponse
 
 
 def test_login_success_returns_tokens(client, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,7 @@ import json
 import logging
 from collections.abc import Sequence
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.database import SessionLocal
@@ -56,7 +57,7 @@ def run(*, dry_run: bool = False, check: bool = False) -> int:
         print(json.dumps(summary.to_dict(), sort_keys=True))
         logger.info("permission synchronization completed summary=%s", summary.to_dict())
         return 0
-    except Exception as exc:
+    except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
         if db is not None:
             db.rollback()
         logger.error("permission synchronization failed type=%s", type(exc).__name__)

@@ -1,12 +1,13 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.session_service as session_module
 from app.core.database import Base
@@ -16,17 +17,17 @@ from app.models.role import Role, role_permissions, user_roles
 from app.models.session import Session as AuthSession
 from app.models.user import User
 from app.schemas.admin_role import AdminRoleCreate, AdminRoleUpdate
+from app.services.admin_permission_service import (
+    PermissionDisabledError,
+    PermissionNotDeclaredError,
+    PermissionNotFoundError,
+)
 from app.services.admin_role_service import (
     AdminRoleService,
     ProtectedRoleOperationError,
     RoleNameAlreadyExistsError,
     RoleNotFoundError,
     RoleVersionConflictError,
-)
-from app.services.admin_permission_service import (
-    PermissionDisabledError,
-    PermissionNotDeclaredError,
-    PermissionNotFoundError,
 )
 
 
@@ -139,7 +140,7 @@ def role_audits(db: DbSession) -> list[AuditEvent]:
 
 
 def test_list_and_get_roles_support_filters_pagination_and_stable_order(db_session: DbSession) -> None:
-    created_at = datetime(2026, 8, 13, 10, 30)
+    created_at = datetime(2026, 8, 13, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     first = add_role(
         db_session,
         "auditor",
@@ -157,7 +158,7 @@ def test_list_and_get_roles_support_filters_pagination_and_stable_order(db_sessi
         "archive",
         description="Historical records",
         enabled=False,
-        created_at=datetime(2026, 8, 12, 10, 30),
+        created_at=datetime(2026, 8, 12, 10, 30, tzinfo=UTC).replace(tzinfo=None),
     )
     db_session.commit()
     service = AdminRoleService(db_session)

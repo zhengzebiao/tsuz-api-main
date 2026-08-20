@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -11,8 +11,8 @@ from app.schemas.admin_role import (
     AdminRoleDisableRequest,
     AdminRoleListResponse,
     AdminRolePermissionAssignment,
-    AdminRolePermissionSummary,
     AdminRolePermissionsResponse,
+    AdminRolePermissionSummary,
     AdminRoleResponse,
     AdminRoleSummary,
     AdminRoleUpdate,
@@ -21,7 +21,7 @@ from app.schemas.admin_user import AdminUserRoleAssignment, AdminUserRolesRespon
 
 
 def role_for_response() -> Role:
-    now = datetime(2026, 8, 13, 10, 30)
+    now = datetime(2026, 8, 13, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     return Role(
         id=7,
         name="  auditor  ",
@@ -79,7 +79,7 @@ def test_role_update_requires_positive_version_and_rejects_null_or_status_fields
         {"name": "   ", "version": 1},
         {"is_enabled": False, "version": 1},
         {"disabled_reason": "maintenance", "version": 1},
-        {"created_at": datetime(2026, 8, 13), "version": 1},
+        {"created_at": datetime(2026, 8, 13, tzinfo=UTC).replace(tzinfo=None), "version": 1},
     )
 
     for payload in invalid_payloads:

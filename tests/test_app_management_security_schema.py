@@ -1,5 +1,5 @@
-from datetime import datetime
 import re
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -24,7 +24,7 @@ from app.schemas.admin_app import (
 
 
 def app_for_response() -> App:
-    now = datetime(2026, 8, 12, 10, 30)
+    now = datetime(2026, 8, 12, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     return App(
         id=1,
         app_id="app_2d92f64361ea4e249f5c9a0de38bc092",

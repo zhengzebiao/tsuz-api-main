@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -47,7 +47,7 @@ class SessionService:
 
     def _revoke_db_session(self, auth_session: AuthSession, reason: str) -> None:
         auth_session.status = "revoked"
-        auth_session.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        auth_session.revoked_at = datetime.now(UTC).replace(tzinfo=None)
         auth_session.revoked_reason = reason
 
     def _write_redis_revocation(self, sid: str) -> None:

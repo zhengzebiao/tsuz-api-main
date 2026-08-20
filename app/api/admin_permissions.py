@@ -23,9 +23,9 @@ from app.services.admin_permission_service import (
     AdminPermissionService,
     PermissionNotDeclaredError,
     PermissionNotFoundError,
+    PermissionRecord,
     PermissionVersionConflictError,
     ProtectedPermissionOperationError,
-    PermissionRecord,
 )
 
 router = APIRouter(prefix="/admin/permissions", tags=["admin-permissions"])

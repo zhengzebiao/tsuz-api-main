@@ -2,7 +2,8 @@ from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.session_service as session_module
 from app.core.config import settings

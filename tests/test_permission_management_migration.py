@@ -14,7 +14,6 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 HEAD_REVISION = "0007_qq_login"
@@ -205,7 +204,7 @@ def test_permission_management_migration_roundtrip() -> None:
                 "updated_at",
                 "version",
             }
-            for column_name in {
+            for column_name in (
                 "id",
                 "name",
                 "display_name",
@@ -215,9 +214,9 @@ def test_permission_management_migration_roundtrip() -> None:
                 "created_at",
                 "updated_at",
                 "version",
-            }:
+            ):
                 assert columns[column_name]["nullable"] is False
-            for column_name in {"disabled_at", "disabled_reason", "missing_at"}:
+            for column_name in ("disabled_at", "disabled_reason", "missing_at"):
                 assert columns[column_name]["nullable"] is True
             assert {"ix_permissions_id", "ix_permissions_name", "ix_permissions_is_declared", "ix_permissions_is_enabled"} <= set(indexes)
             assert indexes["ix_permissions_name"]["unique"] is True
@@ -295,16 +294,15 @@ def test_permission_management_migration_roundtrip() -> None:
             assert next_permission["updated_at"] is not None
             assert next_permission["version"] == 1
 
-            with pytest.raises(IntegrityError):
-                with engine.begin() as connection:
-                    connection.execute(
-                        text(
-                            "INSERT INTO permission_endpoints "
-                            "(permission_id, http_method, path, route_name) "
-                            "VALUES (:permission_id, 'GET', '/admin/permissions', 'duplicate')"
-                        ),
-                        {"permission_id": permission_id},
-                    )
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO permission_endpoints "
+                        "(permission_id, http_method, path, route_name) "
+                        "VALUES (:permission_id, 'GET', '/admin/permissions', 'duplicate')"
+                    ),
+                    {"permission_id": permission_id},
+                )
         finally:
             engine.dispose()
 

@@ -6,7 +6,6 @@ import pytest
 
 from scripts.validate_phase_4 import Phase4Config, run_management_flow, run_migration_roundtrip
 
-
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PHASE_4_INTEGRATION") != "1",
     reason="set RUN_PHASE_4_INTEGRATION=1 to run isolated PostgreSQL/Redis validation",

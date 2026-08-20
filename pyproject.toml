@@ -41,6 +41,7 @@ permission-sync = "python -m app.commands.sync_permissions"
 init = "python -m scripts.init_local"
 phase4-validate = "python scripts/validate_phase_4.py"
 phase4-email-validate = "python scripts/validate_email_registration_phase_4.py"
+phase4-qq-validate = "python scripts/validate_qq_phase_4.py"
 app-phase5-validate = "python scripts/validate_app_phase_5.py"
 role-phase5-validate = "python scripts/validate_role_management_phase_5.py"
 permission-phase5-validate = "python scripts/validate_permission_management_phase_5.py"
@@ -51,3 +52,12 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+"app/api/admin_apps.py" = ["B008"]
+"app/api/admin_permissions.py" = ["B008"]
+"app/api/admin_roles.py" = ["B008"]
+"app/api/admin_users.py" = ["B008"]
+"app/api/dependencies.py" = ["B008"]
+"tests/test_api_dependencies.py" = ["B008"]
+"tests/test_permission_scanner.py" = ["B008"]

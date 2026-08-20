@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from app.schemas.admin_permission import (
 
 
 def permission_for_response() -> Permission:
-    now = datetime(2026, 8, 14, 10, 30)
+    now = datetime(2026, 8, 14, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     return Permission(
         id=7,
         name="app:read",

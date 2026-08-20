@@ -1,11 +1,12 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.session_service as session_module
 from app.core.database import Base
@@ -303,7 +304,7 @@ def test_disable_revokes_distinct_users_only_through_enabled_roles_and_preserves
 def test_enable_clears_state_but_is_idempotent_and_does_not_revoke(db_session: DbSession) -> None:
     actor = add_user(db_session, "actor@example.com")
     permission = add_permission(db_session, "app:read", enabled=False)
-    permission.disabled_at = datetime(2026, 8, 14, 8, 0)
+    permission.disabled_at = datetime(2026, 8, 14, 8, 0, tzinfo=UTC)
     permission.disabled_reason = "maintenance"
     db_session.commit()
     service = AdminPermissionService(db_session)

@@ -2245,7 +2245,7 @@ def run_http_validation(config: PermissionPhase5Config) -> dict[str, Any]:
         engine = create_engine(database.url, poolclass=NullPool)
         port = config.api_port or _find_available_port(config.api_host)
         base_url = f"http://{config.api_host}:{port}"
-        api_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
+        api_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")  # noqa: SIM115
         process = subprocess.Popen(
             (
                 sys.executable,
@@ -2288,7 +2288,7 @@ def run_http_validation(config: PermissionPhase5Config) -> dict[str, Any]:
                     fixtures,
                 )
                 sensitive_values.update(flow_secrets)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - capture flow failures before cleanup
             flow_error = exc
         finally:
             engine.dispose()

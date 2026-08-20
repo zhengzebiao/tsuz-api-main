@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.main import create_app
@@ -171,7 +172,7 @@ def test_first_sync_creates_real_catalog_bindings_and_admin_grants_idempotently(
 
 def test_sync_preserves_admin_managed_permission_fields(db_session: DbSession) -> None:
     admin_role, _ = add_admin_role(db_session)
-    disabled_at = datetime(2026, 8, 13, 9, 30)
+    disabled_at = datetime(2026, 8, 13, 9, 30, tzinfo=UTC).replace(tzinfo=None)
     permission = Permission(
         name="app:read",
         display_name="应用查询",
@@ -236,7 +237,7 @@ def test_missing_and_restore_preserve_id_roles_and_first_missing_time(
     )
     db_session.commit()
 
-    missing_at = datetime(2026, 8, 13, 10, 0)
+    missing_at = datetime(2026, 8, 13, 10, 0, tzinfo=UTC).replace(tzinfo=None)
     sessions = RecordingSessionService({user.id: 1})
     service = make_service(db_session, sessions, now=missing_at)
     missing_plan = service.build_plan(scan_result(permission_names=()))
@@ -254,7 +255,7 @@ def test_missing_and_restore_preserve_id_roles_and_first_missing_time(
     assert db_session.scalar(select(func.count()).select_from(PermissionEndpoint)) == 0
 
     first_missing_version = permission.version
-    later = datetime(2026, 8, 13, 12, 0)
+    later = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
     repeated_service = make_service(db_session, sessions, now=later)
     repeated_plan = repeated_service.build_plan(scan_result(permission_names=()))
     repeated_service.apply_plan(repeated_plan)
@@ -289,7 +290,7 @@ def test_restore_does_not_enable_an_admin_disabled_permission(db_session: DbSess
         is_declared=False,
         is_enabled=False,
         disabled_reason="operator disabled",
-        missing_at=datetime(2026, 8, 12, 8, 0),
+        missing_at=datetime(2026, 8, 12, 8, 0, tzinfo=UTC).replace(tzinfo=None),
     )
     db_session.add(permission)
     db_session.commit()

@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import pytest
 
 import app.api.auth as auth_api
@@ -20,7 +22,7 @@ from app.services.verification_challenge_service import (
 
 class FakeEmailAuthService:
     error: Exception | None = None
-    calls: list[tuple] = []
+    calls: ClassVar[list[tuple]] = []
 
     def __init__(self, db) -> None:
         self.db = db

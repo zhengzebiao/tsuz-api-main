@@ -12,20 +12,20 @@ import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from redis import Redis  # noqa: E402
-from sqlalchemy import create_engine, text  # noqa: E402
-from sqlalchemy.engine import make_url  # noqa: E402
-from sqlalchemy.pool import NullPool  # noqa: E402
+from redis import Redis
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
 
-from app.core.config import settings  # noqa: E402
-from app.services.tencent_ses_service import EmailProviderError, TencentSesService  # noqa: E402
+from app.core.config import settings
+from app.services.tencent_ses_service import EmailProviderError, TencentSesService
 
 DEFAULT_ADMIN_DATABASE_URL = "postgresql+psycopg://test_user:test_password@127.0.0.1:5432/postgres"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -402,7 +402,7 @@ def run_real_ses_smoke() -> SesSmokeResult:
     status_summary: dict[str, object] = {"status": "sent"}
     if result.message_id:
         status_request = _ses_request("GetSendEmailStatusRequest")
-        status_request.RequestDate = date.today().isoformat()
+        status_request.RequestDate = datetime.now(UTC).date().isoformat()
         status_request.Offset = 0
         status_request.MessageId = result.message_id
         status_request.Limit = 1

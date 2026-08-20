@@ -33,18 +33,16 @@ class QQLoginMigrationValidationError(RuntimeError):
 class MigrationConfig:
     admin_database_url: str
     allow_remote: bool
-    allow_default_port: bool
 
     @classmethod
     def from_env(cls) -> MigrationConfig:
         database_url = os.getenv(
             "QQ_LOGIN_ADMIN_DATABASE_URL",
-            "postgresql+psycopg://test_user:test_password@127.0.0.1:55432/postgres",
+            "postgresql+psycopg://test_user:test_password@127.0.0.1:5432/postgres",
         )
         config = cls(
             admin_database_url=database_url,
             allow_remote=os.getenv("QQ_LOGIN_ALLOW_REMOTE", "0") == "1",
-            allow_default_port=os.getenv("QQ_LOGIN_ALLOW_DEFAULT_PORT", "0") == "1",
         )
         config.validate()
         return config
@@ -56,10 +54,6 @@ class MigrationConfig:
         if not self.allow_remote and database_url.host not in LOCAL_HOSTS:
             raise QQLoginMigrationValidationError(
                 "QQ login migration validation only allows local PostgreSQL by default"
-            )
-        if not self.allow_default_port and (database_url.port or 5432) == 5432:
-            raise QQLoginMigrationValidationError(
-                "QQ login migration validation refuses PostgreSQL 5432 by default"
             )
 
 

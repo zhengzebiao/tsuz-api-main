@@ -11,7 +11,6 @@ from scripts.validate_app_phase_5 import (
     run_migration_validation,
 )
 
-
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_APP_PHASE_5_INTEGRATION") != "1",
     reason="set RUN_APP_PHASE_5_INTEGRATION=1 to run isolated App PostgreSQL/Redis validation",

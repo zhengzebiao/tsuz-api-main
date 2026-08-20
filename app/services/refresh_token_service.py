@@ -1,13 +1,13 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from typing import Any
 
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
-from app.core.security import sha256_text
 from app.core.redis import get_redis
+from app.core.security import sha256_text
 from app.services.session_service import SessionService
 
 logger = logging.getLogger("app.auth.refresh")
@@ -25,7 +25,7 @@ class RefreshTokenService:
 
     def create_refresh_token(self, user_id: str, sid: str) -> str:
         refresh_token = token_urlsafe(48)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires_at = now + timedelta(days=settings.refresh_token_expire_days)
         key = self._refresh_key(refresh_token)
         get_redis().hset(
@@ -68,7 +68,7 @@ class RefreshTokenService:
                 key,
                 mapping={
                     "status": "rotated",
-                    "rotated_at": datetime.now(timezone.utc).isoformat(),
+                    "rotated_at": datetime.now(UTC).isoformat(),
                     "replaced_by": new_refresh_hash,
                 },
             )
@@ -98,13 +98,13 @@ class RefreshTokenService:
 
     def _is_expired(self, expires_at: str) -> bool:
         expires = self._parse_timestamp(expires_at)
-        return expires is None or expires <= datetime.now(timezone.utc)
+        return expires is None or expires <= datetime.now(UTC)
 
     def _within_reuse_grace(self, rotated_at: str) -> bool:
         rotated = self._parse_timestamp(rotated_at)
         if rotated is None:
             return False
-        elapsed = datetime.now(timezone.utc) - rotated
+        elapsed = datetime.now(UTC) - rotated
         return elapsed <= timedelta(seconds=settings.refresh_token_reuse_grace_seconds)
 
     def _parse_timestamp(self, value: str) -> datetime | None:
@@ -112,5 +112,5 @@ class RefreshTokenService:
             return None
         parsed = datetime.fromisoformat(value)
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
+            return parsed.replace(tzinfo=UTC)
         return parsed

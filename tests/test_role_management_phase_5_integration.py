@@ -11,7 +11,6 @@ from scripts.validate_role_management_phase_5 import (
     run_migration_validation,
 )
 
-
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_ROLE_MANAGEMENT_PHASE_5_INTEGRATION") != "1",
     reason=(

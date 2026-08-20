@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +23,6 @@ from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.email_auth_service import EmailAuthService
 from app.services.verification_challenge_service import VerificationChallengeService
-
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PHASE4_EMAIL_INTEGRATION") != "1",
@@ -216,7 +215,7 @@ def test_email_authentication_on_postgres_and_real_redis(monkeypatch: pytest.Mon
         assert sum(outcomes) == 1
         assert redis.exists(f"{settings.email_challenge_prefix}{concurrent.challenge_id}") == 0
 
-        limited_email = f"limit-{datetime.now(timezone.utc).timestamp()}@example.com"
+        limited_email = f"limit-{datetime.now(UTC).timestamp()}@example.com"
         monkeypatch.setattr(settings, "email_send_limit_per_hour", 1)
         limited = challenges.create_challenge(limited_email, "register", "198.51.100.16")
         with pytest.raises(ValueError):

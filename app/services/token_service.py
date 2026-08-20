@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import jwt
@@ -13,7 +13,7 @@ class TokenService:
         return settings.access_token_expire_minutes * 60
 
     def create_access_token(self, user_id: str, sid: str, roles: list[str], scope: str) -> str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires_at = now + timedelta(minutes=settings.access_token_expire_minutes)
         payload = {
             "sub": user_id,

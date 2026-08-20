@@ -1,11 +1,12 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.admin_app_service as service_module
 from app.core.database import Base
@@ -89,7 +90,7 @@ def app_audits(db: DbSession) -> list[AuditEvent]:
 
 
 def test_list_and_get_apps_support_filters_pagination_and_stable_order(db_session: DbSession) -> None:
-    created_at = datetime(2026, 8, 12, 10, 30)
+    created_at = datetime(2026, 8, 12, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     first = add_app(
         db_session,
         app_id="app_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -107,7 +108,7 @@ def test_list_and_get_apps_support_filters_pagination_and_stable_order(db_sessio
         app_id="app_cccccccccccccccccccccccccccccccc",
         name="Archive",
         is_enabled=False,
-        created_at=datetime(2026, 8, 11, 10, 30),
+        created_at=datetime(2026, 8, 11, 10, 30, tzinfo=UTC).replace(tzinfo=None),
     )
     db_session.commit()
     service = AdminAppService(db_session)

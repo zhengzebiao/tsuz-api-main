@@ -2,7 +2,6 @@ import pytest
 
 from app.core.config import Settings
 
-
 EMAIL_SETTING_ENV_VARS = (
     "TENCENTCLOUD_SECRET_ID",
     "TENCENTCLOUD_SECRET_KEY",

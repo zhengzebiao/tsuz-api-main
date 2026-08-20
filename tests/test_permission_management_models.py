@@ -1,10 +1,11 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.permission import Permission
@@ -58,8 +59,8 @@ def test_permission_ids_remain_auto_incrementing_integers(db_session: DbSession)
 
 
 def test_permission_management_fields_can_be_persisted(db_session: DbSession) -> None:
-    disabled_at = datetime(2026, 8, 13, 10, 30)
-    missing_at = datetime(2026, 8, 13, 11, 30)
+    disabled_at = datetime(2026, 8, 13, 10, 30, tzinfo=UTC).replace(tzinfo=None)
+    missing_at = datetime(2026, 8, 13, 11, 30, tzinfo=UTC).replace(tzinfo=None)
     permission = Permission(
         name="permission:update",
         display_name="Update permissions",

@@ -126,9 +126,11 @@ def test_sdk_failure_is_converted_without_leaking_sensitive_data(
     client = RecordingSesClient(error=RuntimeError(f"provider failure code={code} secret={secret}"))
     service = TencentSesService(email_settings, client=client)
 
-    with caplog.at_level(logging.ERROR, logger="app.auth.email"):
-        with pytest.raises(EmailProviderError, match="email provider unavailable") as exc_info:
-            service.send_verification_email(recipient, code, purpose="password_reset")
+    with caplog.at_level(logging.ERROR, logger="app.auth.email"), pytest.raises(
+        EmailProviderError,
+        match="email provider unavailable",
+    ) as exc_info:
+        service.send_verification_email(recipient, code, purpose="password_reset")
 
     assert recipient not in caplog.text
     assert code not in caplog.text

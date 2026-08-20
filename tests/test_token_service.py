@@ -1,5 +1,5 @@
-import pytest
 import jwt
+import pytest
 
 from app.core.config import settings
 from app.services.token_service import TokenService

@@ -2,7 +2,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-import app.api.dependencies as dependencies
+from app.api import dependencies
 from app.api.dependencies import PERMISSION_NAME_MAX_LENGTH, PermissionDeclarationError
 from app.models.user import User
 from app.services.authorization_service import AuthenticationError, PermissionDeniedError

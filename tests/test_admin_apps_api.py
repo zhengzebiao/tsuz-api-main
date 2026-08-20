@@ -5,11 +5,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.api.admin_apps as api_module
-import app.api.dependencies as dependencies
+from app.api import dependencies
 from app.api.admin_apps import router as admin_apps_router
 from app.core.database import Base, get_db
 from app.core.logging import RequestIdMiddleware

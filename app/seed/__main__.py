@@ -13,6 +13,7 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 DEFAULT_ROLE = "admin"
+NORMAL_ROLE = "normal"
 
 
 def get_seed_credentials() -> tuple[str, str]:
@@ -66,8 +67,9 @@ def ensure_user_role(db: Session, user: User, role: Role) -> None:
 def seed(db: Session, *, email: str, password: str) -> None:
     logger.info("seed started target=python-main")
     admin = ensure_admin_user(db, email=email, password=password)
-    role = ensure_role(db, DEFAULT_ROLE)
-    ensure_user_role(db, admin, role)
+    admin_role = ensure_role(db, DEFAULT_ROLE)
+    ensure_user_role(db, admin, admin_role)
+    ensure_role(db, NORMAL_ROLE)
     logger.info("seed completed target=python-main")
 
 

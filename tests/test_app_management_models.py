@@ -1,10 +1,11 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.app import App
@@ -51,7 +52,7 @@ def test_app_management_fields_have_expected_defaults(db_session: DbSession) -> 
 
 
 def test_app_management_fields_can_be_persisted(db_session: DbSession) -> None:
-    disabled_at = datetime(2026, 8, 12, 10, 30)
+    disabled_at = datetime(2026, 8, 12, 10, 30, tzinfo=UTC).replace(tzinfo=None)
     app = make_app()
     app.is_enabled = False
     app.disabled_at = disabled_at

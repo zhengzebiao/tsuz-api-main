@@ -854,7 +854,7 @@ def run_management_flow(config: Phase4Config) -> dict[str, Any]:
 
         port = config.api_port or _find_available_port(config.api_host)
         base_url = f"http://{config.api_host}:{port}"
-        api_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
+        api_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")  # noqa: SIM115 - retained until process cleanup completes
         process = subprocess.Popen(
             (
                 sys.executable,
@@ -881,7 +881,7 @@ def run_management_flow(config: Phase4Config) -> dict[str, Any]:
             _wait_for_api(base_url, process)
             with httpx.Client(base_url=base_url, timeout=15) as client:
                 result = _run_http_management_flow(client, engine, redis_client, env, suffix)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - capture flow failures before cleanup
             flow_error = exc
         finally:
             engine.dispose()

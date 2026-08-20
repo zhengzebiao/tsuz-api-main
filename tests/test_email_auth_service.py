@@ -1,10 +1,11 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import sessionmaker
 
 import app.services.session_service as session_module
 from app.core.database import Base
@@ -136,7 +137,7 @@ def add_user(
         hashed_password=hash_password("old-password"),
         is_active=active,
         is_blacklisted=blacklisted,
-        email_verified_at=datetime(2026, 1, 1),
+        email_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     db.add(user)
     db.commit()
@@ -239,7 +240,7 @@ def test_email_login_delegates_to_shared_auth_path(db_session: DbSession) -> Non
 
 def test_password_reset_code_response_does_not_enumerate_users(db_session: DbSession) -> None:
     add_user(db_session)
-    existing_service, existing_challenges, existing_provider, _auth = make_service(db_session)
+    existing_service, _existing_challenges, existing_provider, _auth = make_service(db_session)
 
     existing_response = existing_service.send_password_reset_code(
         "USER@example.com",

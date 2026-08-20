@@ -10,7 +10,7 @@ from app.core.security import hash_password, verify_password
 from app.models.permission import Permission
 from app.models.role import Role, role_permissions, user_roles
 from app.models.user import User
-from app.seed.__main__ import DEFAULT_ROLE, get_seed_credentials, seed
+from app.seed.__main__ import DEFAULT_ROLE, NORMAL_ROLE, get_seed_credentials, seed
 
 TEST_ADMIN_EMAIL = "seed-admin@example.com"
 TEST_ADMIN_PASSWORD = "test-seed-password"
@@ -37,8 +37,11 @@ def test_seed_adds_admin_identity_without_creating_permissions(db_session: DbSes
 
     admin_user = db_session.scalar(select(User).where(User.email == TEST_ADMIN_EMAIL))
     admin_role = db_session.scalar(select(Role).where(Role.name == DEFAULT_ROLE))
+    normal_role = db_session.scalar(select(Role).where(Role.name == NORMAL_ROLE))
     assert admin_user is not None
     assert admin_role is not None
+    assert normal_role is not None
+    assert normal_role.is_enabled is True
     assert (
         db_session.scalar(
             select(func.count())

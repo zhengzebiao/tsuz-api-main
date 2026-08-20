@@ -6,8 +6,9 @@ Create Date: 2026-08-11
 """
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "0002_user_management"
 down_revision: str | None = "0001_initial_auth_schema"

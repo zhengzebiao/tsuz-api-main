@@ -1,3 +1,6 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.admin_apps import router as admin_apps_router
 from app.api.admin_permissions import router as admin_permissions_router
 from app.api.admin_roles import router as admin_roles_router
@@ -6,8 +9,6 @@ from app.api.auth import router as feature_router
 from app.api.health import router as health_router
 from app.core.config import settings
 from app.core.logging import RequestIdMiddleware, configure_logging
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 
 def create_app() -> FastAPI:

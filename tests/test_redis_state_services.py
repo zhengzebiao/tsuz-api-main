@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -39,7 +39,7 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
 
 
 def test_blacklist_service_uses_configured_prefix_and_access_token_ttl(fake_redis: FakeRedis) -> None:
-    exp = int(datetime.now(timezone.utc).timestamp()) + 120
+    exp = int(datetime.now(UTC).timestamp()) + 120
 
     BlacklistService().add_jti("jti-123", exp)
 

@@ -17,8 +17,8 @@ from app.schemas.admin_role import (
     AdminRoleDisableRequest,
     AdminRoleListResponse,
     AdminRolePermissionAssignment,
-    AdminRolePermissionSummary,
     AdminRolePermissionsResponse,
+    AdminRolePermissionSummary,
     AdminRoleResponse,
     AdminRoleUpdate,
 )
