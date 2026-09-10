@@ -45,8 +45,12 @@ def redact_sensitive(value: object) -> object:
 
 def _redacting_log_record_factory(*args, **kwargs) -> logging.LogRecord:
     record = _original_log_record_factory(*args, **kwargs)
-    record.msg = redact_sensitive(record.getMessage())
-    record.args = ()
+    if record.name == "uvicorn.access" and isinstance(record.args, tuple):
+        record.msg = redact_sensitive(record.msg)
+        record.args = tuple(redact_sensitive(value) for value in record.args)
+    else:
+        record.msg = redact_sensitive(record.getMessage())
+        record.args = ()
     record.request_id = request_id_context.get()
     return record
 

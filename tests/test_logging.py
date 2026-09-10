@@ -1,7 +1,8 @@
 import logging
 
-from app.core.logging import redact_sensitive
+from uvicorn.logging import AccessFormatter
 
+from app.core.logging import configure_logging, redact_sensitive
 
 RAW_JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.signature"
 RAW_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
@@ -19,6 +20,26 @@ def test_request_id_is_echoed_and_attached_to_request_log(client, caplog) -> Non
         record.name == "app.request" and getattr(record, "request_id", "") == "req-test-123"
         for record in caplog.records
     )
+
+
+def test_uvicorn_access_log_preserves_formatter_arguments() -> None:
+    configure_logging()
+    record = logging.getLogger("uvicorn.access").makeRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:12345", "GET", "/health", "1.1", 200),
+        None,
+    )
+
+    formatted = AccessFormatter(
+        '%(client_addr)s - "%(request_line)s" %(status_code)s',
+        use_colors=False,
+    ).format(record)
+
+    assert formatted == '127.0.0.1:12345 - "GET /health HTTP/1.1" 200 OK'
 
 
 def test_security_logs_redact_sensitive_values(caplog) -> None:
