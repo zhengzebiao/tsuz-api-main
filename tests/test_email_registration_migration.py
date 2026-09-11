@@ -15,7 +15,7 @@ from sqlalchemy.pool import NullPool
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 BASE_REVISION = "0005_permission_management"
-HEAD_REVISION = "0006_email_registration"
+HEAD_REVISION = "0007_app_service_authorization"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 pytestmark = pytest.mark.skipif(

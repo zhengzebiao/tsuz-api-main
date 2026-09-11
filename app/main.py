@@ -1,13 +1,18 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.admin_apps import router as admin_apps_router
 from app.api.admin_permissions import router as admin_permissions_router
+from app.api.admin_resource_scopes import router as admin_resource_scopes_router
 from app.api.admin_roles import router as admin_roles_router
+from app.api.admin_service_grants import router as admin_service_grants_router
 from app.api.admin_users import router as admin_users_router
 from app.api.auth import router as feature_router
 from app.api.health import router as health_router
+from app.api.internal import router as internal_router
+from app.api.internal_oauth import router as internal_oauth_router
 from app.core.config import settings
 from app.core.logging import RequestIdMiddleware, configure_logging
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 
 def create_app() -> FastAPI:
@@ -32,6 +37,10 @@ def create_app() -> FastAPI:
     app.include_router(admin_apps_router)
     app.include_router(admin_roles_router)
     app.include_router(admin_permissions_router)
+    app.include_router(admin_resource_scopes_router)
+    app.include_router(admin_service_grants_router)
+    app.include_router(internal_oauth_router)
+    app.include_router(internal_router)
     return app
 
 

@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     jwt_private_key: str = ""
     jwt_public_key: str = ""
 
+    service_token_issuer: str = "tsuz-api-main"
+    service_token_expire_seconds: int = 300
+    service_token_clock_skew_seconds: int = 5
+    service_token_public_key: str = ""
+    main_app_id: str = ""
+    main_app_secret: str = ""
+    jcc_app_id: str = ""
+    jcc_api_base_url: str = "http://127.0.0.1:8001"
+    main_token_url: str = "http://127.0.0.1:8000/internal/oauth/token"
+    internal_http_timeout_seconds: float = 10.0
+
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 7
     refresh_token_rotate: bool = True

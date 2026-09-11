@@ -103,6 +103,19 @@ This template uses PDM with standard `pyproject.toml` metadata.
 - Use different PostgreSQL databases, Redis instances, JWT keys, issuers, audiences, and GitHub Secrets for test and product.
 - The local Compose template uses `postgres` and `redis` as container hostnames. Host-side commands should use a host-specific environment file with `localhost` URLs instead.
 
+## App-to-App Service Authorization
+
+The main service is the Service Token issuer for `tsuz-api-main` and JCC. Register each service identity through the existing `POST /admin/apps` endpoint; the response contains a one-time `app_secret`, while the database stores only its hash. Store the returned IDs and secrets in the deployment secret store, never in Git, migrations, seed data, URLs, logs, or ordinary API responses.
+
+Configure Resource Scopes and App Service Grants through the protected `/admin/resource-scopes` and `/admin/service-grants` endpoints. The two phase-one grants are independent:
+
+- main app → JCC app → `jcc:record:read`;
+- JCC app → main app → `main:application:read`.
+
+`POST /internal/oauth/token` accepts HTTP Basic App credentials and a strict `client_credentials` form, then issues a 300-second RS256 Service Token with `token_use=service`, a single audience, and only the requested granted scopes. Resource APIs validate the Service Token separately from user JWTs. Existing tokens remain valid until their expiry after a Grant is revoked; no refresh token or immediate revocation is implemented in this phase.
+
+The main-side client calls JCC through `/internal/v1/records`; JCC calls the main safe metadata endpoint `/internal/v1/applications/{app_id}`. Both clients use explicit HTTP timeouts and short in-memory token caches. The opt-in cross-service smoke must use random isolated PostgreSQL/Redis resources and must never target a shared or production database.
+
 ## Auth API
 
 - `POST /auth/login` issues access and refresh tokens for the auth service.
@@ -130,6 +143,15 @@ This template uses PDM with standard `pyproject.toml` metadata.
 | `TOKEN_BLACKLIST_PREFIX` | Redis prefix for revoked access-token `jti` values |
 | `REFRESH_TOKEN_PREFIX` | Redis prefix for refresh-token hashes |
 | `SESSION_PREFIX` | Redis prefix for session status markers |
+| `SERVICE_TOKEN_ISSUER` | Issuer for Service Tokens, default `tsuz-api-main` |
+| `SERVICE_TOKEN_EXPIRE_SECONDS` | Service Token lifetime, fixed at 300 for phase one |
+| `SERVICE_TOKEN_CLOCK_SKEW_SECONDS` | Limited validation clock skew |
+| `SERVICE_TOKEN_PUBLIC_KEY` | Public key used for internal Service Token verification |
+| `MAIN_APP_ID` / `MAIN_APP_SECRET` | Main App credentials returned once by `/admin/apps` |
+| `JCC_APP_ID` | JCC target App ID returned by `/admin/apps` |
+| `JCC_API_BASE_URL` | JCC internal API base URL |
+| `MAIN_TOKEN_URL` | Main Service Token endpoint URL |
+| `INTERNAL_HTTP_TIMEOUT_SECONDS` | Explicit internal HTTP timeout |
 
 ## Redis Token State
 

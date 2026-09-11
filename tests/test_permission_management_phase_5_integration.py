@@ -31,7 +31,7 @@ def test_permission_phase5_migration_roundtrip(
 ) -> None:
     report = run_migration_validation(permission_phase5_config)
 
-    assert report["current_revision"] == "0006_email_registration"
+    assert report["current_revision"] == "0007_app_service_authorization"
     assert report["alembic_check"] == "clean"
     assert report["permission_columns_verified"] == 12
     assert report["permission_indexes_verified"] == 4
@@ -50,7 +50,7 @@ def test_permission_phase5_postgres_concurrency_and_redis_rollback(
 
     assert report["advisory_lock_waits_verified"] == 1
     assert report["row_lock_waits_verified"] == 2
-    assert report["sync_counts_verified"] == [26, 33, 26]
+    assert report["sync_counts_verified"] == [33, 40, 33]
     assert report["disable_changes"] == [True, False]
     assert report["enable_changes"] == [True, False]
     assert report["distinct_session_revocations"] == 1
@@ -68,7 +68,7 @@ def test_permission_phase5_real_jwt_redis_sync_and_http(
 
     assert report["permissions_verified"] == 4
     assert report["permission_denials_verified"] >= 6
-    assert report["catalog_counts"] == [26, 33, 26]
+    assert report["catalog_counts"] == [33, 40, 33]
     assert report["lifecycle_audits_verified"] == 3
     assert report["request_ids_verified"] == 3
     assert report["redis_revocations_verified"] == 5

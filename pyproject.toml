@@ -17,7 +17,9 @@ dependencies = [
   "passlib[bcrypt]>=1.7.4",
   "bcrypt>=4.0.1,<5.0.0",
   "email-validator>=2.2.0",
-  "tencentcloud-sdk-python>=3.0.0"
+  "tencentcloud-sdk-python>=3.0.0",
+  "httpx>=0.28.1",
+  "python-multipart>=0.0.20"
 ]
 
 [dependency-groups]
