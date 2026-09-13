@@ -39,7 +39,7 @@ DEFAULT_ADMIN_DATABASE_URL = (
 )
 DEFAULT_REDIS_URL = "redis://127.0.0.1:56379/15"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
-HEAD_REVISION = "0007_app_service_authorization"
+HEAD_REVISION = "0008_permission_reporting"
 PERMISSION_MANAGEMENT_PERMISSIONS = (
     "permission:read",
     "permission:update",
@@ -402,12 +402,15 @@ def run_migration_validation(config: PermissionPhase5Config) -> dict[str, Any]:
             "created_at",
             "updated_at",
             "version",
+            "owner_app_id",
         }
         permission_indexes = {
             "ix_permissions_id",
             "ix_permissions_name",
             "ix_permissions_is_declared",
             "ix_permissions_is_enabled",
+            "ix_permissions_owner_app_id",
+            "ix_permissions_owner_app_declared",
         }
         try:
             inspector = inspect(engine)
@@ -452,7 +455,7 @@ def run_migration_validation(config: PermissionPhase5Config) -> dict[str, Any]:
                     columns[column_name]["nullable"] is False,
                     f"permissions.{column_name} must be NOT NULL",
                 )
-            for column_name in ("disabled_at", "disabled_reason", "missing_at"):
+            for column_name in ("disabled_at", "disabled_reason", "missing_at", "owner_app_id"):
                 _assert(
                     columns[column_name]["nullable"] is True,
                     f"permissions.{column_name} must be nullable",
@@ -472,6 +475,14 @@ def run_migration_validation(config: PermissionPhase5Config) -> dict[str, Any]:
             _assert(
                 indexes["ix_permissions_is_enabled"]["unique"] is False,
                 "permission enabled index must not be unique",
+            )
+            _assert(
+                indexes["ix_permissions_owner_app_id"]["unique"] is False,
+                "permission owner index must not be unique",
+            )
+            _assert(
+                indexes["ix_permissions_owner_app_declared"]["unique"] is False,
+                "permission owner/declared index must not be unique",
             )
             _assert(
                 set(endpoint_columns)

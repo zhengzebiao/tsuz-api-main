@@ -11,6 +11,7 @@ from app.api.auth import router as feature_router
 from app.api.health import router as health_router
 from app.api.internal import router as internal_router
 from app.api.internal_oauth import router as internal_oauth_router
+from app.api.internal_permissions import router as internal_permissions_router
 from app.core.config import settings
 from app.core.logging import RequestIdMiddleware, configure_logging
 
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_resource_scopes_router)
     app.include_router(admin_service_grants_router)
     app.include_router(internal_oauth_router)
+    app.include_router(internal_permissions_router)
     app.include_router(internal_router)
     return app
 

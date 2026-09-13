@@ -66,6 +66,7 @@ class AdminPermissionService:
         resource: str | None = None,
         is_declared: bool | None = None,
         is_enabled: bool | None = None,
+        owner_app_id: str | None = None,
     ) -> tuple[list[PermissionRecord], int]:
         endpoint_count = self._endpoint_count_expression()
         role_count = self._role_count_expression()
@@ -98,6 +99,11 @@ class AdminPermissionService:
             filters.append(Permission.is_declared.is_(is_declared))
         if is_enabled is not None:
             filters.append(Permission.is_enabled.is_(is_enabled))
+        if owner_app_id is not None:
+            normalized_owner = owner_app_id.strip()
+            if not normalized_owner:
+                raise ValueError("invalid owner_app_id")
+            filters.append(Permission.owner_app_id == normalized_owner)
 
         if filters:
             query = query.where(*filters)

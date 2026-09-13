@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, func, text, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, func, text, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -11,10 +11,16 @@ class Permission(Base):
     __table_args__ = (
         Index("ix_permissions_is_declared", "is_declared"),
         Index("ix_permissions_is_enabled", "is_enabled"),
+        Index("ix_permissions_owner_app_declared", "owner_app_id", "is_declared"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    owner_app_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("apps.app_id", ondelete="RESTRICT"),
+        index=True,
+    )
     display_name: Mapped[str] = mapped_column(String(128), default="", server_default="")
     description: Mapped[str] = mapped_column(String(255), default="", server_default="")
     is_declared: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())

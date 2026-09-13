@@ -29,6 +29,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_ADMIN_DATABASE_URL = "postgresql+psycopg://test_user:test_password@127.0.0.1:5432/postgres"
 DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/15"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+HEAD_REVISION = "0008_permission_reporting"
 
 
 class Phase4ValidationError(RuntimeError):
@@ -352,13 +353,13 @@ def run_migration_roundtrip(config: Phase4Config) -> dict[str, Any]:
 
         _alembic(database.url, "upgrade", "head")
         current_output = _alembic(database.url, "current")
-        _assert("0007_app_service_authorization" in current_output, "database did not return to the head revision")
+        _assert(HEAD_REVISION in current_output, "database did not return to the head revision")
         return {
             "database": database.name,
             "legacy_user_preserved": True,
             "legacy_session_preserved": True,
             "alembic_check": "clean",
-            "current_revision": "0007_app_service_authorization",
+            "current_revision": HEAD_REVISION,
         }
 
 

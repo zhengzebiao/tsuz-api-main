@@ -114,7 +114,7 @@ Configure Resource Scopes and App Service Grants through the protected `/admin/r
 
 `POST /internal/oauth/token` accepts HTTP Basic App credentials and a strict `client_credentials` form, then issues a 300-second RS256 Service Token with `token_use=service`, a single audience, and only the requested granted scopes. Resource APIs validate the Service Token separately from user JWTs. Existing tokens remain valid until their expiry after a Grant is revoked; no refresh token or immediate revocation is implemented in this phase.
 
-The main-side client calls JCC through `/internal/v1/records`; JCC calls the main safe metadata endpoint `/internal/v1/applications/{app_id}`. Both clients use explicit HTTP timeouts and short in-memory token caches. The opt-in cross-service smoke must use random isolated PostgreSQL/Redis resources and must never target a shared or production database.
+The main-side client calls JCC through `/internal/v1/records` and `/internal/v1/resource-statistics`; JCC calls the main safe metadata endpoint `/internal/v1/applications/{app_id}`. Both clients use explicit HTTP timeouts and per-scope short in-memory token caches. A child application reports its complete permission catalog with `PUT /internal/v1/permissions/report` using `main:permission:report`; the caller is taken from the validated Service Token and new permissions are added to the main `admin` role. The opt-in cross-service smoke must use random isolated PostgreSQL/Redis resources and must never target a shared or production database.
 
 ## Auth API
 

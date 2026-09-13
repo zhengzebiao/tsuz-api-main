@@ -36,6 +36,7 @@ if str(ROOT_DIR) not in sys.path:
 DEFAULT_ADMIN_DATABASE_URL = "postgresql+psycopg://test_user:test_password@127.0.0.1:55432/postgres"
 DEFAULT_REDIS_URL = "redis://127.0.0.1:56379/15"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+HEAD_REVISION = "0008_permission_reporting"
 APP_PERMISSIONS = (
     "app:read",
     "app:create",
@@ -373,10 +374,10 @@ def run_migration_validation(config: AppPhase5Config) -> dict[str, Any]:
 
         _alembic(database.url, "upgrade", "head")
         current_output = _alembic(database.url, "current")
-        _assert("0007_app_service_authorization" in current_output, "database did not return to App migration head")
+        _assert(HEAD_REVISION in current_output, "database did not return to App migration head")
         return {
             "database": database.name,
-            "current_revision": "0007_app_service_authorization",
+            "current_revision": HEAD_REVISION,
             "alembic_check": "clean",
             "legacy_user_preserved": True,
             "app_columns_verified": 14,

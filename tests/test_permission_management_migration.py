@@ -17,7 +17,7 @@ from sqlalchemy.pool import NullPool
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
-HEAD_REVISION = "0007_app_service_authorization"
+HEAD_REVISION = "0008_permission_reporting"
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PERMISSION_MANAGEMENT_PHASE_1_MIGRATION") != "1",
@@ -204,6 +204,7 @@ def test_permission_management_migration_roundtrip() -> None:
                 "created_at",
                 "updated_at",
                 "version",
+                "owner_app_id",
             }
             for column_name in {
                 "id",
@@ -217,9 +218,9 @@ def test_permission_management_migration_roundtrip() -> None:
                 "version",
             }:
                 assert columns[column_name]["nullable"] is False
-            for column_name in {"disabled_at", "disabled_reason", "missing_at"}:
+            for column_name in {"disabled_at", "disabled_reason", "missing_at", "owner_app_id"}:
                 assert columns[column_name]["nullable"] is True
-            assert {"ix_permissions_id", "ix_permissions_name", "ix_permissions_is_declared", "ix_permissions_is_enabled"} <= set(indexes)
+            assert {"ix_permissions_id", "ix_permissions_name", "ix_permissions_is_declared", "ix_permissions_is_enabled", "ix_permissions_owner_app_id", "ix_permissions_owner_app_declared"} <= set(indexes)
             assert indexes["ix_permissions_name"]["unique"] is True
             assert indexes["ix_permissions_is_declared"]["unique"] is False
             assert indexes["ix_permissions_is_enabled"]["unique"] is False

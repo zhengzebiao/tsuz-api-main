@@ -62,7 +62,8 @@ def _request_id() -> str:
 
 def _permission_response(record: PermissionRecord) -> AdminPermissionResponse:
     permission = record.permission
-    resource, action = permission.name.split(":", 1)
+    *resource_parts, action = permission.name.split(":")
+    resource = ":".join(resource_parts)
     return AdminPermissionResponse(
         id=permission.id,
         name=permission.name,
@@ -134,6 +135,7 @@ def list_permissions(
     ),
     is_declared: bool | None = Query(default=None),
     is_enabled: bool | None = Query(default=None),
+    owner_app_id: str | None = Query(default=None, max_length=64),
     _actor: User = Depends(require_permissions("permission:read")),
     db: DbSession = Depends(get_db),
 ) -> AdminPermissionListResponse:
@@ -144,6 +146,7 @@ def list_permissions(
         resource=resource,
         is_declared=is_declared,
         is_enabled=is_enabled,
+        owner_app_id=owner_app_id,
     )
     return AdminPermissionListResponse(
         items=[_permission_response(record) for record in permissions],

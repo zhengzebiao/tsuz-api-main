@@ -132,7 +132,11 @@ class PermissionSyncService:
         self._validate_scan_result(scan_result)
         admin_role = self._get_admin_role()
         permissions = list(
-            self.db.scalars(select(Permission).order_by(Permission.name, Permission.id)).all()
+            self.db.scalars(
+                select(Permission)
+                .where(Permission.owner_app_id.is_(None))
+                .order_by(Permission.name, Permission.id)
+            ).all()
         )
         permission_by_name = {permission.name: permission for permission in permissions}
         target_names = set(scan_result.permission_names)
@@ -234,7 +238,9 @@ class PermissionSyncService:
     def _apply_locked_plan(self, plan: PermissionSyncPlan) -> PermissionSyncSummary:
         permissions = {
             permission.name: permission
-            for permission in self.db.scalars(select(Permission)).all()
+            for permission in self.db.scalars(
+                select(Permission).where(Permission.owner_app_id.is_(None))
+            ).all()
         }
         now = self._now_factory()
 
@@ -356,6 +362,7 @@ class PermissionSyncService:
                 PermissionEndpoint,
                 PermissionEndpoint.permission_id == Permission.id,
             )
+            .where(Permission.owner_app_id.is_(None))
         ).all()
         return {
             name: {
