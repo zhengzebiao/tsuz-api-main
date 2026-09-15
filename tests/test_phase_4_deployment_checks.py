@@ -166,6 +166,15 @@ def test_deploy_compose_uses_generated_environment_and_external_backend() -> Non
     assert "- .env" in compose
     assert "external: true" in compose
     assert "name: ${DOCKER_NETWORK_NAME:-product-backend}" in compose
+    assert "aliases:" in compose
+    assert "- main-api" in compose
+
+
+def test_nginx_uses_the_main_api_network_alias() -> None:
+    nginx = _read(NGINX_CONFIG)
+
+    assert nginx.count("proxy_pass http://main-api:8000") == 2
+    assert "proxy_pass http://api:8000" not in nginx
 
 
 def test_nginx_forwards_client_chain_for_trusted_proxy_validation() -> None:
